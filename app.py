@@ -36,7 +36,7 @@ DB_PATH = "boss.db"
 
 
 # =========================================================
-# 預設 BOSS 名單
+# 預設 BOSS
 # =========================================================
 
 DEFAULT_BOSSES = {
@@ -94,6 +94,7 @@ def init_db():
 
     conn = sqlite3.connect(DB_PATH)
 
+    # BOSS 種類
     conn.execute("""
         CREATE TABLE IF NOT EXISTS boss_types (
             boss_key TEXT PRIMARY KEY,
@@ -102,6 +103,7 @@ def init_db():
         )
     """)
 
+    # BOSS 死亡紀錄
     conn.execute("""
         CREATE TABLE IF NOT EXISTS boss_kills (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +116,15 @@ def init_db():
         )
     """)
 
+    # 每個群組 / 聊天室自己的 HALF 狀態
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_settings (
+            chat_id TEXT PRIMARY KEY,
+            half_mode INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    # 預設 BOSS
     for boss_name, minutes in DEFAULT_BOSSES.items():
 
         conn.execute("""
@@ -137,7 +148,7 @@ init_db()
 
 
 # =========================================================
-# 聊天室 / 群組 ID
+# 取得聊天室 / 群組 ID
 # =========================================================
 
 def get_chat_id(event):
@@ -154,6 +165,67 @@ def get_chat_id(event):
         return source.user_id
 
     return "unknown"
+
+
+# =========================================================
+# HALF 狀態
+# 每個群組 / 聊天室獨立
+# =========================================================
+
+def get_half_mode(chat_id):
+
+    conn = sqlite3.connect(DB_PATH)
+
+    row = conn.execute("""
+        SELECT half_mode
+        FROM chat_settings
+        WHERE chat_id = ?
+    """, (chat_id,)).fetchone()
+
+    conn.close()
+
+    if row:
+        return bool(row[0])
+
+    # 沒設定過 = 預設關閉
+    return False
+
+
+def set_half_mode(chat_id, enabled):
+
+    conn = sqlite3.connect(DB_PATH)
+
+    conn.execute("""
+        INSERT INTO chat_settings (
+            chat_id,
+            half_mode
+        )
+        VALUES (?, ?)
+
+        ON CONFLICT(chat_id)
+        DO UPDATE SET
+            half_mode = excluded.half_mode
+    """, (
+        chat_id,
+        1 if enabled else 0
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def toggle_half_mode(chat_id):
+
+    current = get_half_mode(chat_id)
+
+    new_value = not current
+
+    set_half_mode(
+        chat_id,
+        new_value
+    )
+
+    return new_value
 
 
 # =========================================================
@@ -303,6 +375,7 @@ def delete_boss(boss_name):
 
 # =========================================================
 # 手動死亡時間
+#
 # 1022 = 今天 10:22
 # =========================================================
 
@@ -319,10 +392,10 @@ def parse_manual_time(time_text):
     hour = int(time_text[:2])
     minute = int(time_text[2:])
 
-    if hour > 23:
+    if hour < 0 or hour > 23:
         return None
 
-    if minute > 59:
+    if minute < 0 or minute > 59:
         return None
 
     now = datetime.now(TZ)
@@ -347,12 +420,23 @@ def record_kill(
 ):
 
     if kill_time is None:
-
         kill_time = datetime.now(TZ)
+
+    # -----------------------------------------------------
+    # HALF
+    # 只有目前聊天室 / 群組開啟時才減半
+    # -----------------------------------------------------
+
+    half_mode = get_half_mode(chat_id)
+
+    if half_mode:
+        actual_minutes = minutes / 2
+    else:
+        actual_minutes = minutes
 
     respawn_time = (
         kill_time
-        + timedelta(minutes=minutes)
+        + timedelta(minutes=actual_minutes)
     )
 
     conn = sqlite3.connect(DB_PATH)
@@ -383,11 +467,18 @@ def record_kill(
     conn.commit()
     conn.close()
 
-    return kill_time, respawn_time
+    return (
+        kill_time,
+        respawn_time,
+        actual_minutes,
+        half_mode
+    )
 
 
 # =========================================================
 # RESTART
+# 只清除目前聊天室死亡紀錄
+# 不會改 HALF 狀態
 # =========================================================
 
 def restart_bosses(chat_id):
@@ -416,17 +507,25 @@ def create_kill_card(
     kill_time,
     respawn_time,
     minutes,
-    manual=False
+    manual=False,
+    half_mode=False
 ):
 
     if manual:
-
         title = f"{boss_name} 已補登"
-
     else:
-
         title = f"{boss_name} 已記錄"
 
+    if half_mode:
+        mode_text = "⚡ HALF 減半"
+    else:
+        mode_text = "正常"
+
+    # 避免顯示 360.0
+    if float(minutes).is_integer():
+        minutes_text = f"{int(minutes):,}"
+    else:
+        minutes_text = f"{minutes:g}"
 
     bubble = {
 
@@ -444,7 +543,11 @@ def create_kill_card(
                 {
                     "type": "box",
                     "layout": "vertical",
-                    "backgroundColor": "#E5ECF5",
+                    "backgroundColor": (
+                        "#FFF1D6"
+                        if half_mode
+                        else "#E5ECF5"
+                    ),
                     "cornerRadius": "8px",
                     "paddingAll": "12px",
 
@@ -455,7 +558,11 @@ def create_kill_card(
                             "text": title,
                             "weight": "bold",
                             "size": "xl",
-                            "color": "#405B78",
+                            "color": (
+                                "#C56A00"
+                                if half_mode
+                                else "#405B78"
+                            ),
                             "wrap": True
                         }
                     ]
@@ -532,7 +639,7 @@ def create_kill_card(
 
                                 {
                                     "type": "text",
-                                    "text": "週期",
+                                    "text": "實際週期",
                                     "size": "sm",
                                     "weight": "bold",
                                     "color": "#617A96"
@@ -540,7 +647,9 @@ def create_kill_card(
 
                                 {
                                     "type": "text",
-                                    "text": f"{minutes:,} 分鐘",
+                                    "text": (
+                                        f"{minutes_text} 分鐘"
+                                    ),
                                     "size": "md",
                                     "margin": "sm",
                                     "color": "#222222"
@@ -557,7 +666,7 @@ def create_kill_card(
 
                                 {
                                     "type": "text",
-                                    "text": "時區",
+                                    "text": "模式",
                                     "size": "sm",
                                     "weight": "bold",
                                     "color": "#617A96"
@@ -565,14 +674,26 @@ def create_kill_card(
 
                                 {
                                     "type": "text",
-                                    "text": "Asia/Taipei",
+                                    "text": mode_text,
                                     "size": "md",
                                     "margin": "sm",
-                                    "color": "#222222"
+                                    "color": (
+                                        "#C56A00"
+                                        if half_mode
+                                        else "#222222"
+                                    )
                                 }
                             ]
                         }
                     ]
+                },
+
+                {
+                    "type": "text",
+                    "text": "時區：Asia/Taipei",
+                    "size": "xs",
+                    "margin": "xl",
+                    "color": "#64748B"
                 }
             ]
         }
@@ -606,7 +727,7 @@ def weekday_tw(dt):
 
 
 # =========================================================
-# 目前已記錄的王
+# 取得目前已記錄 BOSS
 # =========================================================
 
 def get_current_bosses(chat_id):
@@ -671,7 +792,6 @@ def create_kb_table(chat_id):
             )
         )
 
-
     date_groups = {}
 
     for item in bosses:
@@ -686,24 +806,19 @@ def create_kb_table(chat_id):
         )
 
         if date_key not in date_groups:
-
             date_groups[date_key] = []
 
         date_groups[date_key].append(
             item
         )
 
-
     all_dates = sorted(
         date_groups.keys()
     )
 
     cards = []
-
     current_contents = []
-
     current_rows = 0
-
 
     def add_card(contents):
 
@@ -716,7 +831,6 @@ def create_kb_table(chat_id):
             "size": "mega",
 
             "body": {
-
                 "type": "box",
                 "layout": "vertical",
                 "paddingAll": "12px",
@@ -755,10 +869,7 @@ def create_kb_table(chat_id):
             }
         }
 
-        cards.append(
-            bubble
-        )
-
+        cards.append(bubble)
 
     for date_key in all_dates:
 
@@ -770,7 +881,6 @@ def create_kb_table(chat_id):
             items[0]["respawn_time"]
             .astimezone(TZ)
         )
-
 
         date_header = {
 
@@ -793,12 +903,10 @@ def create_kb_table(chat_id):
 
                 {
                     "type": "text",
-
                     "text": (
                         f"{sample_date.strftime('%m/%d')} "
                         f"{weekday_tw(sample_date)}"
                     ),
-
                     "size": "xs",
                     "weight": "bold",
                     "color": "#1E293B"
@@ -806,16 +914,13 @@ def create_kb_table(chat_id):
             ]
         }
 
-
         needed_rows = (
             len(items) + 1
         )
 
-
         if (
             current_contents
-            and
-            current_rows + needed_rows > 13
+            and current_rows + needed_rows > 13
         ):
 
             add_card(
@@ -823,9 +928,7 @@ def create_kb_table(chat_id):
             )
 
             current_contents = []
-
             current_rows = 0
-
 
         current_contents.append(
             date_header
@@ -833,14 +936,12 @@ def create_kb_table(chat_id):
 
         current_rows += 1
 
-
         for item in items:
 
             respawn = (
                 item["respawn_time"]
                 .astimezone(TZ)
             )
-
 
             row = {
 
@@ -854,11 +955,9 @@ def create_kb_table(chat_id):
 
                     {
                         "type": "text",
-
                         "text": respawn.strftime(
                             "%H:%M:%S"
                         ),
-
                         "size": "xs",
                         "weight": "bold",
                         "color": "#111827",
@@ -892,27 +991,19 @@ def create_kb_table(chat_id):
                 ]
             }
 
-
             current_contents.append(
                 row
             )
 
             current_rows += 1
 
-
     add_card(
         current_contents
     )
 
+    total_cards = len(cards)
 
-    total_cards = len(
-        cards
-    )
-
-
-    for index, card in enumerate(
-        cards
-    ):
+    for index, card in enumerate(cards):
 
         card[
             "footer"
@@ -924,18 +1015,13 @@ def create_kb_table(chat_id):
             f"{index + 1}/{total_cards}"
         )
 
-
     carousel = {
-
         "type": "carousel",
         "contents": cards
     }
 
-
     return FlexMessage(
-
         alt_text="BOSS 重生時間表",
-
         contents=FlexContainer.from_dict(
             carousel
         )
@@ -959,13 +1045,11 @@ def get_boss_list(chat_id):
             "輸入：K 大象H"
         )
 
-
     result = (
         "👑 BOSS 重生時間\n\n"
     )
 
     now = datetime.now(TZ)
-
 
     for item in bosses:
 
@@ -973,7 +1057,6 @@ def get_boss_list(chat_id):
             item["respawn_time"]
             .astimezone(TZ)
         )
-
 
         if respawn <= now:
 
@@ -983,13 +1066,10 @@ def get_boss_list(chat_id):
 
         else:
 
-            diff = (
-                respawn - now
-            )
+            diff = respawn - now
 
             total_minutes = int(
-                diff.total_seconds()
-                // 60
+                diff.total_seconds() // 60
             )
 
             days = (
@@ -1007,19 +1087,16 @@ def get_boss_list(chat_id):
             parts = []
 
             if days:
-
                 parts.append(
                     f"{days}天"
                 )
 
             if hours:
-
                 parts.append(
                     f"{hours}小時"
                 )
 
             if minutes:
-
                 parts.append(
                     f"{minutes}分"
                 )
@@ -1028,17 +1105,11 @@ def get_boss_list(chat_id):
                 " ".join(parts)
             )
 
-
         result += (
-
             f"⚔️ {item['boss_name']}\n"
-
-            f"🕐 "
-            f"{respawn.strftime('%m/%d %H:%M:%S')}\n"
-
+            f"🕐 {respawn.strftime('%m/%d %H:%M:%S')}\n"
             f"⏳ {remaining}\n\n"
         )
-
 
     return result.strip()
 
@@ -1046,10 +1117,9 @@ def get_boss_list(chat_id):
 # =========================================================
 # 王列表
 #
-# 自動分類：
-# XXXH -> H線
-# XXX1 -> 1線
-# 其他 -> 其他
+# H 結尾 = H線
+# 1 結尾 = 1線
+# 其他 = 其他
 # =========================================================
 
 def get_boss_names():
@@ -1066,27 +1136,20 @@ def get_boss_names():
 
     conn.close()
 
-
     lines = {
-
         "H線": {},
         "1線": {},
         "其他": {}
     }
 
-
     for boss_name, minutes in rows:
 
-        upper_name = (
-            boss_name.upper()
-        )
+        upper_name = boss_name.upper()
 
-        # 最後是 H
         if upper_name.endswith("H"):
 
             line_name = "H線"
 
-        # 最後是 1
         elif boss_name.endswith("1"):
 
             line_name = "1線"
@@ -1094,7 +1157,6 @@ def get_boss_names():
         else:
 
             line_name = "其他"
-
 
         if minutes not in lines[
             line_name
@@ -1104,16 +1166,13 @@ def get_boss_names():
                 line_name
             ][minutes] = []
 
-
         lines[
             line_name
         ][minutes].append(
             boss_name
         )
 
-
     result = "📋 BOSS 名單\n"
-
 
     for line_name in [
         "H線",
@@ -1125,31 +1184,23 @@ def get_boss_names():
             line_name
         ]
 
-        # 沒有王就不顯示這一線
         if not groups:
             continue
 
-
         result += (
-            f"\n━━━━━━━━━━\n"
+            "\n━━━━━━━━━━\n"
             f"【{line_name}】\n"
-            f"━━━━━━━━━━\n"
+            "━━━━━━━━━━\n"
         )
-
 
         for minutes in sorted(
             groups.keys()
         ):
 
-            # 顯示週期
             if minutes % 60 == 0:
 
-                hours = (
-                    minutes // 60
-                )
-
                 title = (
-                    f"{hours}小時"
+                    f"{minutes // 60}小時"
                 )
 
             else:
@@ -1158,13 +1209,10 @@ def get_boss_names():
                     f"{minutes}分鐘"
                 )
 
-
             result += (
                 f"\n〔{title}〕\n"
             )
 
-
-            # 每行最多放 5 隻
             boss_list = groups[
                 minutes
             ]
@@ -1183,7 +1231,6 @@ def get_boss_names():
                     )
                     + "\n"
                 )
-
 
     return result.strip()
 
@@ -1226,6 +1273,22 @@ def get_help():
         "→ 查看全部王\n\n"
 
 
+        "【HALF 減半模式】\n\n"
+
+        "HALF\n"
+        "→ 切換目前群組正常 / 減半模式\n\n"
+
+        "HALF ON\n"
+        "→ 目前群組開啟減半模式\n\n"
+
+        "HALF OFF\n"
+        "→ 目前群組關閉減半模式\n\n"
+
+        "※ HALF 開啟後，之後新 K 的 BOSS "
+        "重生時間會減半。\n"
+        "※ 不會修改已經記錄的舊重生時間。\n\n"
+
+
         "【新增 / 修改】\n\n"
 
         "新增王 BOSS名稱+線路 重生分鐘\n"
@@ -1250,11 +1313,17 @@ def get_help():
 
         "【批次新增】\n\n"
 
-        "批次新增王 BOSS名稱+線路、BOSS名稱+線路 重生分鐘\n"
+        "批次新增王 "
+        "BOSS名稱+線路、BOSS名稱+線路 "
+        "重生分鐘\n"
+
         "→ 一次新增多隻相同重生時間的 BOSS\n\n"
 
         "例如：\n"
-        "批次新增王 伐木1、倒塌1、山峰1 720\n"
+
+        "批次新增王 "
+        "伐木1、倒塌1、山峰1 720\n"
+
         "→ 一次新增3隻1線 BOSS，12小時重生\n\n"
 
 
@@ -1295,7 +1364,6 @@ def callback():
         as_text=True
     )
 
-
     try:
 
         handler.handle(
@@ -1306,7 +1374,6 @@ def callback():
     except InvalidSignatureError:
 
         abort(400)
-
 
     return "OK"
 
@@ -1321,9 +1388,7 @@ def callback():
 )
 def handle_message(event):
 
-    text = (
-        event.message.text.strip()
-    )
+    text = event.message.text.strip()
 
     chat_id = get_chat_id(
         event
@@ -1333,25 +1398,96 @@ def handle_message(event):
 
 
     # =====================================================
+    # HALF
+    # =====================================================
+
+    if text.upper() == "HALF":
+
+        enabled = toggle_half_mode(
+            chat_id
+        )
+
+        if enabled:
+
+            reply_message = TextMessage(
+                text=(
+                    "⚡ HALF 減半模式：已開啟\n\n"
+                    "目前群組之後新 K 的 BOSS，"
+                    "重生週期全部減半。\n\n"
+                    "720 → 360 分鐘\n"
+                    "1440 → 720 分鐘\n"
+                    "2880 → 1440 分鐘"
+                )
+            )
+
+        else:
+
+            reply_message = TextMessage(
+                text=(
+                    "⏱️ HALF 減半模式：已關閉\n\n"
+                    "目前群組已恢復正常重生週期。"
+                )
+            )
+
+
+    # =====================================================
+    # HALF ON
+    # =====================================================
+
+    elif text.upper() == "HALF ON":
+
+        set_half_mode(
+            chat_id,
+            True
+        )
+
+        reply_message = TextMessage(
+            text=(
+                "⚡ HALF 減半模式：已開啟\n\n"
+                "目前群組之後新 K 的 BOSS，"
+                "重生週期全部減半。\n\n"
+                "720 → 360 分鐘\n"
+                "1440 → 720 分鐘\n"
+                "2880 → 1440 分鐘"
+            )
+        )
+
+
+    # =====================================================
+    # HALF OFF
+    # =====================================================
+
+    elif text.upper() == "HALF OFF":
+
+        set_half_mode(
+            chat_id,
+            False
+        )
+
+        reply_message = TextMessage(
+            text=(
+                "⏱️ HALF 減半模式：已關閉\n\n"
+                "目前群組已恢復正常重生週期。"
+            )
+        )
+
+
+    # =====================================================
     # RESTART
     # =====================================================
 
-    if text.upper() == "RESTART":
+    elif text.upper() == "RESTART":
 
         deleted_count = restart_bosses(
             chat_id
         )
 
         reply_message = TextMessage(
-
             text=(
-
                 "🔄 RESTART 完成\n"
-
-                "已清除全部週期王死亡時間。\n"
-
-                f"共清除 "
-                f"{deleted_count} 筆紀錄。"
+                "已清除目前聊天室全部死亡紀錄。\n"
+                f"共清除 {deleted_count} 筆紀錄。\n\n"
+                "HALF 設定不受影響。"
             )
         )
 
@@ -1369,8 +1505,6 @@ def handle_message(event):
 
     # =====================================================
     # 批次新增王
-    #
-    # 批次新增王 王A、王B、王C 720
     # =====================================================
 
     elif text.startswith(
@@ -1380,7 +1514,6 @@ def handle_message(event):
         content = text[
             len("批次新增王 "):
         ].strip()
-
 
         try:
 
@@ -1396,9 +1529,7 @@ def handle_message(event):
             )
 
             if minutes <= 0:
-
                 raise ValueError
-
 
         except (
             ValueError,
@@ -1406,67 +1537,47 @@ def handle_message(event):
         ):
 
             reply_message = TextMessage(
-
                 text=(
-
                     "❌ 批次新增格式錯誤\n\n"
-
                     "正確格式：\n"
-
-                    "批次新增王 "
-                    "王A、王B、王C 720\n\n"
-
-                    "最後面的數字是"
-                    "重生週期（分鐘）。"
+                    "批次新增王 王A1、王B1、王C1 720\n\n"
+                    "最後面的數字是重生週期（分鐘）。"
                 )
             )
-
 
         else:
 
             boss_text = (
-
                 boss_text
-
                 .replace(
                     "，",
                     "、"
                 )
-
                 .replace(
                     ",",
                     "、"
                 )
             )
 
-
             boss_names = [
-
                 name.strip()
-
                 for name
                 in boss_text.split("、")
-
                 if name.strip()
             ]
-
 
             if not boss_names:
 
                 reply_message = TextMessage(
-
                     text=(
                         "❌ 沒有找到 BOSS 名稱。"
                     )
                 )
 
-
             else:
 
                 success_list = []
-
                 exists_list = []
-
 
                 for boss_name in boss_names:
 
@@ -1474,7 +1585,6 @@ def handle_message(event):
                         boss_name,
                         minutes
                     )
-
 
                     if success:
 
@@ -1488,42 +1598,29 @@ def handle_message(event):
                             boss_name
                         )
 
-
                 result = (
-
                     "✅ 批次新增完成\n\n"
-
-                    f"週期："
-                    f"{minutes:,} 分鐘\n"
-
-                    f"成功新增："
-                    f"{len(success_list)} 隻\n"
+                    f"週期：{minutes:,} 分鐘\n"
+                    f"成功新增：{len(success_list)} 隻\n"
                 )
-
 
                 if success_list:
 
                     result += (
-
                         "\n【新增成功】\n"
-
                         + "、".join(
                             success_list
                         )
                     )
 
-
                 if exists_list:
 
                     result += (
-
                         "\n\n【已存在／跳過】\n"
-
                         + "、".join(
                             exists_list
                         )
                     )
-
 
                 reply_message = TextMessage(
                     text=result
@@ -1540,26 +1637,19 @@ def handle_message(event):
 
         parts = text.split()
 
-
         if len(parts) != 3:
 
             reply_message = TextMessage(
-
                 text=(
-
                     "❌ 格式錯誤\n\n"
-
-                    "正確格式：\n"
-
-                    "新增王 黑龍H 1440"
+                    "新增王 BOSS名稱+線路 重生分鐘\n\n"
+                    "例如：新增王 黑龍1 720"
                 )
             )
-
 
         else:
 
             boss_name = parts[1]
-
 
             try:
 
@@ -1568,59 +1658,38 @@ def handle_message(event):
                 )
 
                 if minutes <= 0:
-
                     raise ValueError
 
-
                 success, message = add_boss(
-
                     boss_name,
                     minutes
                 )
 
-
                 if success:
 
                     reply_message = TextMessage(
-
                         text=(
-
                             "✅ 新增 BOSS 成功\n\n"
-
-                            f"名稱："
-                            f"{boss_name}\n"
-
-                            f"週期："
-                            f"{minutes:,} 分鐘"
+                            f"名稱：{boss_name}\n"
+                            f"週期：{minutes:,} 分鐘"
                         )
                     )
-
 
                 else:
 
                     reply_message = TextMessage(
-
                         text=(
-
                             f"❌ {message}\n"
-
-                            "如果要改週期，"
-                            "請使用「修改王」。"
+                            "如果要改週期，請使用「修改王」。"
                         )
                     )
-
 
             except ValueError:
 
                 reply_message = TextMessage(
-
                     text=(
-
                         "❌ 週期必須是分鐘數。\n\n"
-
-                        "例如：\n"
-
-                        "新增王 黑龍H 1440"
+                        "例如：新增王 黑龍1 720"
                     )
                 )
 
@@ -1635,25 +1704,18 @@ def handle_message(event):
 
         parts = text.split()
 
-
         if len(parts) != 3:
 
             reply_message = TextMessage(
-
                 text=(
-
                     "❌ 格式錯誤\n"
-
-                    "例如："
-                    "修改王 黑龍H 2880"
+                    "例如：修改王 黑龍1 1440"
                 )
             )
-
 
         else:
 
             boss_name = parts[1]
-
 
             try:
 
@@ -1662,60 +1724,39 @@ def handle_message(event):
                 )
 
                 if minutes <= 0:
-
                     raise ValueError
 
-
                 success, result = edit_boss(
-
                     boss_name,
                     minutes
                 )
 
-
                 if success:
 
                     reply_message = TextMessage(
-
                         text=(
-
                             "✏️ 修改 BOSS 成功\n\n"
-
-                            f"名稱："
-                            f"{result}\n"
-
-                            f"新週期："
-                            f"{minutes:,} 分鐘\n\n"
-
-                            "※ 已記錄的舊重生時間"
-                            "不會改變，"
-
-                            "下次重新 K 王時"
-                            "會套用新週期。"
+                            f"名稱：{result}\n"
+                            f"新週期：{minutes:,} 分鐘\n\n"
+                            "※ 已記錄的舊重生時間不會改變，"
+                            "下次重新 K 王時會套用新週期。"
                         )
                     )
-
 
                 else:
 
                     reply_message = TextMessage(
-
                         text=(
                             "❌ 找不到這隻王。"
                         )
                     )
 
-
             except ValueError:
 
                 reply_message = TextMessage(
-
                     text=(
-
                         "❌ 週期必須是分鐘數。\n"
-
-                        "例如："
-                        "修改王 黑龍H 2880"
+                        "例如：修改王 黑龍1 1440"
                     )
                 )
 
@@ -1730,20 +1771,14 @@ def handle_message(event):
 
         parts = text.split()
 
-
         if len(parts) != 2:
 
             reply_message = TextMessage(
-
                 text=(
-
                     "❌ 格式錯誤\n"
-
-                    "例如："
-                    "刪除王 黑龍H"
+                    "例如：刪除王 黑龍1"
                 )
             )
-
 
         else:
 
@@ -1751,24 +1786,18 @@ def handle_message(event):
                 parts[1]
             )
 
-
             if success:
 
                 reply_message = TextMessage(
-
                     text=(
-
                         "🗑️ 已刪除 BOSS\n"
-
                         f"{real_name}"
                     )
                 )
 
-
             else:
 
                 reply_message = TextMessage(
-
                     text=(
                         "❌ 找不到這隻王。"
                     )
@@ -1778,8 +1807,8 @@ def handle_message(event):
     # =====================================================
     # K 王
     #
-    # K 2GH
-    # K 2GH 1022
+    # K 大象H
+    # K 大象H 1022
     # =====================================================
 
     elif text.upper().startswith(
@@ -1789,7 +1818,7 @@ def handle_message(event):
         parts = text.split()
 
 
-        # K 王
+        # K 王 - 現在時間
         if len(parts) == 2:
 
             input_name = parts[1]
@@ -1798,69 +1827,56 @@ def handle_message(event):
                 input_name
             )
 
-
             if boss_name is None:
 
                 reply_message = TextMessage(
-
                     text=(
-
-                        f"❌ 找不到 BOSS："
-                        f"{input_name}\n\n"
-
-                        "輸入「王列表」"
-                        "查看完整名單。"
+                        f"❌ 找不到 BOSS：{input_name}\n\n"
+                        "輸入「王列表」查看完整名單。"
                     )
                 )
 
-
             else:
 
-                kill_time, respawn_time = record_kill(
-
+                (
+                    kill_time,
+                    respawn_time,
+                    actual_minutes,
+                    half_mode
+                ) = record_kill(
                     chat_id,
                     boss_name,
                     minutes
                 )
 
-
                 reply_message = create_kill_card(
-
                     boss_name,
                     kill_time,
                     respawn_time,
-                    minutes,
-                    manual=False
+                    actual_minutes,
+                    manual=False,
+                    half_mode=half_mode
                 )
 
 
-        # K 王 1022
+        # K 王 1022 - 手動補登
         elif len(parts) == 3:
 
             input_name = parts[1]
-
             time_text = parts[2]
-
 
             boss_name, minutes = find_boss(
                 input_name
             )
 
-
             if boss_name is None:
 
                 reply_message = TextMessage(
-
                     text=(
-
-                        f"❌ 找不到 BOSS："
-                        f"{input_name}\n\n"
-
-                        "輸入「王列表」"
-                        "查看完整名單。"
+                        f"❌ 找不到 BOSS：{input_name}\n\n"
+                        "輸入「王列表」查看完整名單。"
                     )
                 )
-
 
             else:
 
@@ -1868,56 +1884,47 @@ def handle_message(event):
                     time_text
                 )
 
-
                 if manual_time is None:
 
                     reply_message = TextMessage(
-
                         text=(
-
                             "❌ 時間格式錯誤\n\n"
-
                             "請輸入 4 碼時間。\n"
-
-                            "例如：K 2GH 1022\n"
-
+                            "例如：K 大象H 1022\n"
                             "代表今天 10:22。"
                         )
                     )
 
-
                 else:
 
-                    kill_time, respawn_time = record_kill(
-
+                    (
+                        kill_time,
+                        respawn_time,
+                        actual_minutes,
+                        half_mode
+                    ) = record_kill(
                         chat_id,
                         boss_name,
                         minutes,
                         kill_time=manual_time
                     )
 
-
                     reply_message = create_kill_card(
-
                         boss_name,
                         kill_time,
                         respawn_time,
-                        minutes,
-                        manual=True
+                        actual_minutes,
+                        manual=True,
+                        half_mode=half_mode
                     )
-
 
         else:
 
             reply_message = TextMessage(
-
                 text=(
-
                     "❌ K 王格式錯誤\n\n"
-
-                    "現在時間：K 2GH\n"
-
-                    "手動補登：K 2GH 1022"
+                    "現在時間：K 大象H\n"
+                    "手動補登：K 大象H 1022"
                 )
             )
 
@@ -1933,7 +1940,6 @@ def handle_message(event):
     ]:
 
         reply_message = TextMessage(
-
             text=get_boss_names()
         )
 
@@ -1950,7 +1956,6 @@ def handle_message(event):
     ]:
 
         reply_message = TextMessage(
-
             text=get_boss_list(
                 chat_id
             )
@@ -1969,7 +1974,6 @@ def handle_message(event):
     ]:
 
         reply_message = TextMessage(
-
             text=get_help()
         )
 
@@ -1984,10 +1988,26 @@ def handle_message(event):
         "TEST"
     ]:
 
-        reply_message = TextMessage(
+        half_mode = get_half_mode(
+            chat_id
+        )
 
+        if half_mode:
+
+            mode_text = (
+                "⚡ HALF 減半模式"
+            )
+
+        else:
+
+            mode_text = (
+                "⏱️ 正常模式"
+            )
+
+        reply_message = TextMessage(
             text=(
-                "✅ BOSS Bot 正常運作！"
+                "✅ BOSS Bot 正常運作！\n"
+                f"目前：{mode_text}"
             )
         )
 
@@ -2007,12 +2027,8 @@ def handle_message(event):
             )
 
             line_bot_api.reply_message(
-
                 ReplyMessageRequest(
-
-                    reply_token=
-                        event.reply_token,
-
+                    reply_token=event.reply_token,
                     messages=[
                         reply_message
                     ]
@@ -2027,7 +2043,6 @@ def handle_message(event):
 if __name__ == "__main__":
 
     port = int(
-
         os.environ.get(
             "PORT",
             5000
@@ -2035,7 +2050,6 @@ if __name__ == "__main__":
     )
 
     app.run(
-
         host="0.0.0.0",
         port=port
     )
