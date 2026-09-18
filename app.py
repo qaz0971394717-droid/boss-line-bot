@@ -1,7 +1,9 @@
 import os
-import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 from flask import Flask, request, abort
 
@@ -27,12 +29,12 @@ app = Flask(__name__)
 
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 TZ = ZoneInfo("Asia/Taipei")
-DB_PATH = "boss.db"
 
 
 # =========================================================
@@ -41,7 +43,9 @@ DB_PATH = "boss.db"
 
 DEFAULT_BOSSES = {
 
-    # 12 小時
+    # =====================================================
+    # H線 12小時
+    # =====================================================
     "沼澤H": 720,
     "倒塌H": 720,
     "沙漠H": 720,
@@ -52,8 +56,6 @@ DEFAULT_BOSSES = {
     "激戰H": 720,
     "扭曲H": 720,
     "灰色H": 720,
-    "743": 720,
-    "z2": 720,
     "貝特H": 720,
     "時光H": 720,
     "伐木H": 720,
@@ -63,85 +65,153 @@ DEFAULT_BOSSES = {
     "巨大H": 720,
     "雪怪H": 720,
 
-    # 24 小時
+    # =====================================================
+    # 其他 12小時
+    # =====================================================
+    "743": 720,
+    "z2": 720,
+
+    # =====================================================
+    # H線 24小時
+    # =====================================================
     "大象H": 1440,
     "蠍子H": 1440,
     "火狗H": 1440,
-    "745": 1440,
-    "Z4": 1440,
     "貝努H": 1440,
-    "公墓2": 1440,
-    "公墓3": 1440,
-    "公墓4": 1440,
     "船長H": 1440,
     "競技場H": 1440,
 
-    # 48 小時
+    # =====================================================
+    # 其他 24小時
+    # =====================================================
+    "745": 1440,
+    "Z4": 1440,
+    "公墓2": 1440,
+    "公墓3": 1440,
+    "公墓4": 1440,
+
+    # =====================================================
+    # H線 48小時
+    # =====================================================
     "1GH": 2880,
     "2GH": 2880,
     "3GH": 2880,
     "5GH": 2880,
     "6GH": 2880,
     "7GH": 2880,
+
+    # =====================================================
+    # 1線 12小時
+    # =====================================================
+    "伐木1": 720,
+    "倒塌1": 720,
+    "山峰1": 720,
+    "巨大1": 720,
+    "廢墟1": 720,
+    "扭曲1": 720,
+    "掠奪1": 720,
+    "時光1": 720,
+    "歐奎1": 720,
+    "沙漠1": 720,
+    "沼澤1": 720,
+    "涼風1": 720,
+    "激戰1": 720,
+    "灰色1": 720,
+    "生命1": 720,
+    "貝特1": 720,
+    "阿德1": 720,
+    "雪怪1": 720,
+
+    # =====================================================
+    # 1線 24小時
+    # =====================================================
+    "大象1": 1440,
+    "火狗1": 1440,
+    "競技場1": 1440,
+    "船長1": 1440,
+    "蠍子1": 1440,
+    "貝努1": 1440,
+
+    # =====================================================
+    # 1線 48小時
+    # =====================================================
+    "1G1": 2880,
+    "2G1": 2880,
+    "3G1": 2880,
+    "5G1": 2880,
+    "6G1": 2880,
+    "7G1": 2880,
 }
 
 
 # =========================================================
-# 資料庫
+# PostgreSQL
 # =========================================================
+
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
 
 def init_db():
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    # BOSS 種類
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS boss_types (
-            boss_key TEXT PRIMARY KEY,
-            boss_name TEXT NOT NULL,
-            minutes INTEGER NOT NULL
-        )
-    """)
+    try:
+        with conn.cursor() as cur:
 
-    # BOSS 死亡紀錄
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS boss_kills (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT NOT NULL,
-            boss_key TEXT NOT NULL,
-            boss_name TEXT NOT NULL,
-            kill_time TEXT NOT NULL,
-            respawn_time TEXT NOT NULL,
-            UNIQUE(chat_id, boss_key)
-        )
-    """)
+            # BOSS 種類
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS boss_types (
+                    boss_key TEXT PRIMARY KEY,
+                    boss_name TEXT NOT NULL,
+                    minutes INTEGER NOT NULL
+                )
+            """)
 
-    # 每個群組 / 聊天室自己的 HALF 狀態
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS chat_settings (
-            chat_id TEXT PRIMARY KEY,
-            half_mode INTEGER NOT NULL DEFAULT 0
-        )
-    """)
+            # BOSS 死亡紀錄
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS boss_kills (
+                    id BIGSERIAL PRIMARY KEY,
+                    chat_id TEXT NOT NULL,
+                    boss_key TEXT NOT NULL,
+                    boss_name TEXT NOT NULL,
+                    kill_time TIMESTAMPTZ NOT NULL,
+                    respawn_time TIMESTAMPTZ NOT NULL,
+                    UNIQUE(chat_id, boss_key)
+                )
+            """)
 
-    # 預設 BOSS
-    for boss_name, minutes in DEFAULT_BOSSES.items():
+            # 每個群組 / 聊天室自己的 HALF 狀態
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_settings (
+                    chat_id TEXT PRIMARY KEY,
+                    half_mode BOOLEAN NOT NULL DEFAULT FALSE
+                )
+            """)
 
-        conn.execute("""
-            INSERT OR IGNORE INTO boss_types (
-                boss_key,
-                boss_name,
-                minutes
-            )
-            VALUES (?, ?, ?)
-        """, (
-            boss_name.lower(),
-            boss_name,
-            minutes
-        ))
+            # 預設 BOSS
+            for boss_name, minutes in DEFAULT_BOSSES.items():
 
-    conn.commit()
-    conn.close()
+                cur.execute("""
+                    INSERT INTO boss_types (
+                        boss_key,
+                        boss_name,
+                        minutes
+                    )
+                    VALUES (%s, %s, %s)
+
+                    ON CONFLICT (boss_key)
+                    DO NOTHING
+                """, (
+                    boss_name.lower(),
+                    boss_name,
+                    minutes
+                ))
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
 
 init_db()
@@ -168,57 +238,65 @@ def get_chat_id(event):
 
 
 # =========================================================
-# HALF 狀態
-# 每個群組 / 聊天室獨立
+# HALF
+# 每個 LINE 群組 / 聊天室獨立
 # =========================================================
 
 def get_half_mode(chat_id):
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    row = conn.execute("""
-        SELECT half_mode
-        FROM chat_settings
-        WHERE chat_id = ?
-    """, (chat_id,)).fetchone()
+    try:
+        with conn.cursor() as cur:
 
-    conn.close()
+            cur.execute("""
+                SELECT half_mode
+                FROM chat_settings
+                WHERE chat_id = %s
+            """, (chat_id,))
 
-    if row:
-        return bool(row[0])
+            row = cur.fetchone()
 
-    # 沒設定過 = 預設關閉
-    return False
+            if row:
+                return bool(row[0])
+
+            return False
+
+    finally:
+        conn.close()
 
 
 def set_half_mode(chat_id, enabled):
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    conn.execute("""
-        INSERT INTO chat_settings (
-            chat_id,
-            half_mode
-        )
-        VALUES (?, ?)
+    try:
+        with conn.cursor() as cur:
 
-        ON CONFLICT(chat_id)
-        DO UPDATE SET
-            half_mode = excluded.half_mode
-    """, (
-        chat_id,
-        1 if enabled else 0
-    ))
+            cur.execute("""
+                INSERT INTO chat_settings (
+                    chat_id,
+                    half_mode
+                )
+                VALUES (%s, %s)
 
-    conn.commit()
-    conn.close()
+                ON CONFLICT (chat_id)
+                DO UPDATE SET
+                    half_mode = EXCLUDED.half_mode
+            """, (
+                chat_id,
+                enabled
+            ))
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
 
 def toggle_half_mode(chat_id):
 
-    current = get_half_mode(chat_id)
-
-    new_value = not current
+    new_value = not get_half_mode(chat_id)
 
     set_half_mode(
         chat_id,
@@ -236,20 +314,26 @@ def find_boss(input_name):
 
     boss_key = input_name.strip().lower()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    row = conn.execute("""
-        SELECT boss_name, minutes
-        FROM boss_types
-        WHERE boss_key = ?
-    """, (boss_key,)).fetchone()
+    try:
+        with conn.cursor() as cur:
 
-    conn.close()
+            cur.execute("""
+                SELECT boss_name, minutes
+                FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
 
-    if row:
-        return row[0], row[1]
+            row = cur.fetchone()
 
-    return None, None
+            if row:
+                return row[0], row[1]
+
+            return None, None
+
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -261,37 +345,39 @@ def add_boss(boss_name, minutes):
     boss_name = boss_name.strip()
     boss_key = boss_name.lower()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    exists = conn.execute("""
-        SELECT 1
-        FROM boss_types
-        WHERE boss_key = ?
-    """, (boss_key,)).fetchone()
+    try:
+        with conn.cursor() as cur:
 
-    if exists:
+            cur.execute("""
+                SELECT 1
+                FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
 
+            if cur.fetchone():
+                return False, "這隻王已經存在。"
+
+            cur.execute("""
+                INSERT INTO boss_types (
+                    boss_key,
+                    boss_name,
+                    minutes
+                )
+                VALUES (%s, %s, %s)
+            """, (
+                boss_key,
+                boss_name,
+                minutes
+            ))
+
+        conn.commit()
+
+        return True, "新增成功"
+
+    finally:
         conn.close()
-
-        return False, "這隻王已經存在。"
-
-    conn.execute("""
-        INSERT INTO boss_types (
-            boss_key,
-            boss_name,
-            minutes
-        )
-        VALUES (?, ?, ?)
-    """, (
-        boss_key,
-        boss_name,
-        minutes
-    ))
-
-    conn.commit()
-    conn.close()
-
-    return True, "新增成功"
 
 
 # =========================================================
@@ -302,35 +388,39 @@ def edit_boss(boss_name, minutes):
 
     boss_key = boss_name.strip().lower()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    row = conn.execute("""
-        SELECT boss_name
-        FROM boss_types
-        WHERE boss_key = ?
-    """, (boss_key,)).fetchone()
+    try:
+        with conn.cursor() as cur:
 
-    if not row:
+            cur.execute("""
+                SELECT boss_name
+                FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
 
+            row = cur.fetchone()
+
+            if not row:
+                return False, "找不到這隻王。"
+
+            real_name = row[0]
+
+            cur.execute("""
+                UPDATE boss_types
+                SET minutes = %s
+                WHERE boss_key = %s
+            """, (
+                minutes,
+                boss_key
+            ))
+
+        conn.commit()
+
+        return True, real_name
+
+    finally:
         conn.close()
-
-        return False, "找不到這隻王。"
-
-    real_name = row[0]
-
-    conn.execute("""
-        UPDATE boss_types
-        SET minutes = ?
-        WHERE boss_key = ?
-    """, (
-        minutes,
-        boss_key
-    ))
-
-    conn.commit()
-    conn.close()
-
-    return True, real_name
 
 
 # =========================================================
@@ -341,41 +431,44 @@ def delete_boss(boss_name):
 
     boss_key = boss_name.strip().lower()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    row = conn.execute("""
-        SELECT boss_name
-        FROM boss_types
-        WHERE boss_key = ?
-    """, (boss_key,)).fetchone()
+    try:
+        with conn.cursor() as cur:
 
-    if not row:
+            cur.execute("""
+                SELECT boss_name
+                FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
 
+            row = cur.fetchone()
+
+            if not row:
+                return False, None
+
+            real_name = row[0]
+
+            cur.execute("""
+                DELETE FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
+
+            cur.execute("""
+                DELETE FROM boss_kills
+                WHERE boss_key = %s
+            """, (boss_key,))
+
+        conn.commit()
+
+        return True, real_name
+
+    finally:
         conn.close()
-
-        return False, None
-
-    real_name = row[0]
-
-    conn.execute("""
-        DELETE FROM boss_types
-        WHERE boss_key = ?
-    """, (boss_key,))
-
-    conn.execute("""
-        DELETE FROM boss_kills
-        WHERE boss_key = ?
-    """, (boss_key,))
-
-    conn.commit()
-    conn.close()
-
-    return True, real_name
 
 
 # =========================================================
 # 手動死亡時間
-#
 # 1022 = 今天 10:22
 # =========================================================
 
@@ -422,11 +515,6 @@ def record_kill(
     if kill_time is None:
         kill_time = datetime.now(TZ)
 
-    # -----------------------------------------------------
-    # HALF
-    # 只有目前聊天室 / 群組開啟時才減半
-    # -----------------------------------------------------
-
     half_mode = get_half_mode(chat_id)
 
     if half_mode:
@@ -439,33 +527,38 @@ def record_kill(
         + timedelta(minutes=actual_minutes)
     )
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    conn.execute("""
-        INSERT INTO boss_kills (
-            chat_id,
-            boss_key,
-            boss_name,
-            kill_time,
-            respawn_time
-        )
-        VALUES (?, ?, ?, ?, ?)
+    try:
+        with conn.cursor() as cur:
 
-        ON CONFLICT(chat_id, boss_key)
-        DO UPDATE SET
-            boss_name = excluded.boss_name,
-            kill_time = excluded.kill_time,
-            respawn_time = excluded.respawn_time
-    """, (
-        chat_id,
-        boss_name.lower(),
-        boss_name,
-        kill_time.isoformat(),
-        respawn_time.isoformat()
-    ))
+            cur.execute("""
+                INSERT INTO boss_kills (
+                    chat_id,
+                    boss_key,
+                    boss_name,
+                    kill_time,
+                    respawn_time
+                )
+                VALUES (%s, %s, %s, %s, %s)
 
-    conn.commit()
-    conn.close()
+                ON CONFLICT (chat_id, boss_key)
+                DO UPDATE SET
+                    boss_name = EXCLUDED.boss_name,
+                    kill_time = EXCLUDED.kill_time,
+                    respawn_time = EXCLUDED.respawn_time
+            """, (
+                chat_id,
+                boss_name.lower(),
+                boss_name,
+                kill_time,
+                respawn_time
+            ))
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
     return (
         kill_time,
@@ -478,24 +571,28 @@ def record_kill(
 # =========================================================
 # RESTART
 # 只清除目前聊天室死亡紀錄
-# 不會改 HALF 狀態
 # =========================================================
 
 def restart_bosses(chat_id):
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    cursor = conn.execute("""
-        DELETE FROM boss_kills
-        WHERE chat_id = ?
-    """, (chat_id,))
+    try:
+        with conn.cursor() as cur:
 
-    deleted_count = cursor.rowcount
+            cur.execute("""
+                DELETE FROM boss_kills
+                WHERE chat_id = %s
+            """, (chat_id,))
 
-    conn.commit()
-    conn.close()
+            deleted_count = cur.rowcount
 
-    return deleted_count
+        conn.commit()
+
+        return deleted_count
+
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -521,7 +618,6 @@ def create_kill_card(
     else:
         mode_text = "正常"
 
-    # 避免顯示 360.0
     if float(minutes).is_integer():
         minutes_text = f"{int(minutes):,}"
     else:
@@ -585,7 +681,7 @@ def create_kill_card(
 
                         {
                             "type": "text",
-                            "text": kill_time.strftime(
+                            "text": kill_time.astimezone(TZ).strftime(
                                 "%Y-%m-%d %H:%M:%S"
                             ),
                             "size": "md",
@@ -612,7 +708,7 @@ def create_kill_card(
 
                         {
                             "type": "text",
-                            "text": respawn_time.strftime(
+                            "text": respawn_time.astimezone(TZ).strftime(
                                 "%Y-%m-%d %H:%M:%S"
                             ),
                             "size": "md",
@@ -647,9 +743,7 @@ def create_kill_card(
 
                                 {
                                     "type": "text",
-                                    "text": (
-                                        f"{minutes_text} 分鐘"
-                                    ),
+                                    "text": f"{minutes_text} 分鐘",
                                     "size": "md",
                                     "margin": "sm",
                                     "color": "#222222"
@@ -701,9 +795,7 @@ def create_kill_card(
 
     return FlexMessage(
         alt_text=title,
-        contents=FlexContainer.from_dict(
-            bubble
-        )
+        contents=FlexContainer.from_dict(bubble)
     )
 
 
@@ -732,44 +824,37 @@ def weekday_tw(dt):
 
 def get_current_bosses(chat_id):
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db()
 
-    rows = conn.execute("""
-        SELECT
-            boss_name,
-            kill_time,
-            respawn_time
-        FROM boss_kills
-        WHERE chat_id = ?
-        ORDER BY respawn_time ASC
-    """, (chat_id,)).fetchall()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
-    conn.close()
+            cur.execute("""
+                SELECT
+                    boss_name,
+                    kill_time,
+                    respawn_time
+                FROM boss_kills
+                WHERE chat_id = %s
+                ORDER BY respawn_time ASC
+            """, (chat_id,))
 
-    result = []
+            rows = cur.fetchall()
 
-    for (
-        boss_name,
-        kill_string,
-        respawn_string
-    ) in rows:
+            result = []
 
-        result.append({
+            for row in rows:
 
-            "boss_name": boss_name,
+                result.append({
+                    "boss_name": row["boss_name"],
+                    "kill_time": row["kill_time"],
+                    "respawn_time": row["respawn_time"]
+                })
 
-            "kill_time":
-                datetime.fromisoformat(
-                    kill_string
-                ),
+            return result
 
-            "respawn_time":
-                datetime.fromisoformat(
-                    respawn_string
-                )
-        })
-
-    return result
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -778,9 +863,7 @@ def get_current_bosses(chat_id):
 
 def create_kb_table(chat_id):
 
-    bosses = get_current_bosses(
-        chat_id
-    )
+    bosses = get_current_bosses(chat_id)
 
     if not bosses:
 
@@ -796,25 +879,16 @@ def create_kb_table(chat_id):
 
     for item in bosses:
 
-        respawn = (
-            item["respawn_time"]
-            .astimezone(TZ)
-        )
+        respawn = item["respawn_time"].astimezone(TZ)
 
-        date_key = respawn.strftime(
-            "%Y-%m-%d"
-        )
+        date_key = respawn.strftime("%Y-%m-%d")
 
         if date_key not in date_groups:
             date_groups[date_key] = []
 
-        date_groups[date_key].append(
-            item
-        )
+        date_groups[date_key].append(item)
 
-    all_dates = sorted(
-        date_groups.keys()
-    )
+    all_dates = sorted(date_groups.keys())
 
     cards = []
     current_contents = []
@@ -873,14 +947,9 @@ def create_kb_table(chat_id):
 
     for date_key in all_dates:
 
-        items = date_groups[
-            date_key
-        ]
+        items = date_groups[date_key]
 
-        sample_date = (
-            items[0]["respawn_time"]
-            .astimezone(TZ)
-        )
+        sample_date = items[0]["respawn_time"].astimezone(TZ)
 
         date_header = {
 
@@ -914,34 +983,24 @@ def create_kb_table(chat_id):
             ]
         }
 
-        needed_rows = (
-            len(items) + 1
-        )
+        needed_rows = len(items) + 1
 
         if (
             current_contents
             and current_rows + needed_rows > 13
         ):
 
-            add_card(
-                current_contents
-            )
+            add_card(current_contents)
 
             current_contents = []
             current_rows = 0
 
-        current_contents.append(
-            date_header
-        )
-
+        current_contents.append(date_header)
         current_rows += 1
 
         for item in items:
 
-            respawn = (
-                item["respawn_time"]
-                .astimezone(TZ)
-            )
+            respawn = item["respawn_time"].astimezone(TZ)
 
             row = {
 
@@ -955,9 +1014,7 @@ def create_kb_table(chat_id):
 
                     {
                         "type": "text",
-                        "text": respawn.strftime(
-                            "%H:%M:%S"
-                        ),
+                        "text": respawn.strftime("%H:%M:%S"),
                         "size": "xs",
                         "weight": "bold",
                         "color": "#111827",
@@ -979,9 +1036,7 @@ def create_kb_table(chat_id):
 
                             {
                                 "type": "text",
-                                "text": item[
-                                    "boss_name"
-                                ],
+                                "text": item["boss_name"],
                                 "size": "xs",
                                 "weight": "bold",
                                 "color": "#2563C5"
@@ -991,27 +1046,16 @@ def create_kb_table(chat_id):
                 ]
             }
 
-            current_contents.append(
-                row
-            )
-
+            current_contents.append(row)
             current_rows += 1
 
-    add_card(
-        current_contents
-    )
+    add_card(current_contents)
 
     total_cards = len(cards)
 
     for index, card in enumerate(cards):
 
-        card[
-            "footer"
-        ][
-            "contents"
-        ][1][
-            "text"
-        ] = (
+        card["footer"]["contents"][1]["text"] = (
             f"{index + 1}/{total_cards}"
         )
 
@@ -1022,9 +1066,7 @@ def create_kb_table(chat_id):
 
     return FlexMessage(
         alt_text="BOSS 重生時間表",
-        contents=FlexContainer.from_dict(
-            carousel
-        )
+        contents=FlexContainer.from_dict(carousel)
     )
 
 
@@ -1034,9 +1076,7 @@ def create_kb_table(chat_id):
 
 def get_boss_list(chat_id):
 
-    bosses = get_current_bosses(
-        chat_id
-    )
+    bosses = get_current_bosses(chat_id)
 
     if not bosses:
 
@@ -1045,24 +1085,17 @@ def get_boss_list(chat_id):
             "輸入：K 大象H"
         )
 
-    result = (
-        "👑 BOSS 重生時間\n\n"
-    )
+    result = "👑 BOSS 重生時間\n\n"
 
     now = datetime.now(TZ)
 
     for item in bosses:
 
-        respawn = (
-            item["respawn_time"]
-            .astimezone(TZ)
-        )
+        respawn = item["respawn_time"].astimezone(TZ)
 
         if respawn <= now:
 
-            remaining = (
-                "🔥 已到重生時間"
-            )
+            remaining = "🔥 已到重生時間"
 
         else:
 
@@ -1072,38 +1105,30 @@ def get_boss_list(chat_id):
                 diff.total_seconds() // 60
             )
 
-            days = (
-                total_minutes // 1440
-            )
+            days = total_minutes // 1440
 
             hours = (
                 total_minutes % 1440
             ) // 60
 
-            minutes = (
-                total_minutes % 60
-            )
+            minutes = total_minutes % 60
 
             parts = []
 
             if days:
-                parts.append(
-                    f"{days}天"
-                )
+                parts.append(f"{days}天")
 
             if hours:
-                parts.append(
-                    f"{hours}小時"
-                )
+                parts.append(f"{hours}小時")
 
             if minutes:
-                parts.append(
-                    f"{minutes}分"
-                )
+                parts.append(f"{minutes}分")
 
-            remaining = (
-                " ".join(parts)
-            )
+            remaining = " ".join(parts)
+
+    # 避免剛好不足 1 分鐘時顯示空白
+            if not remaining:
+                remaining = "不到1分鐘"
 
         result += (
             f"⚔️ {item['boss_name']}\n"
@@ -1116,25 +1141,25 @@ def get_boss_list(chat_id):
 
 # =========================================================
 # 王列表
-#
-# H 結尾 = H線
-# 1 結尾 = 1線
-# 其他 = 其他
 # =========================================================
 
 def get_boss_names():
 
-    conn = sqlite3.connect(
-        DB_PATH
-    )
+    conn = get_db()
 
-    rows = conn.execute("""
-        SELECT boss_name, minutes
-        FROM boss_types
-        ORDER BY minutes ASC, boss_name ASC
-    """).fetchall()
+    try:
+        with conn.cursor() as cur:
 
-    conn.close()
+            cur.execute("""
+                SELECT boss_name, minutes
+                FROM boss_types
+                ORDER BY minutes ASC, boss_name ASC
+            """)
+
+            rows = cur.fetchall()
+
+    finally:
+        conn.close()
 
     lines = {
         "H線": {},
@@ -1146,10 +1171,12 @@ def get_boss_names():
 
         upper_name = boss_name.upper()
 
+        # 1GH、2GH...屬於 H線
         if upper_name.endswith("H"):
 
             line_name = "H線"
 
+        # 1G1、伐木1...屬於 1線
         elif boss_name.endswith("1"):
 
             line_name = "1線"
@@ -1158,19 +1185,10 @@ def get_boss_names():
 
             line_name = "其他"
 
-        if minutes not in lines[
-            line_name
-        ]:
+        if minutes not in lines[line_name]:
+            lines[line_name][minutes] = []
 
-            lines[
-                line_name
-            ][minutes] = []
-
-        lines[
-            line_name
-        ][minutes].append(
-            boss_name
-        )
+        lines[line_name][minutes].append(boss_name)
 
     result = "📋 BOSS 名單\n"
 
@@ -1180,9 +1198,7 @@ def get_boss_names():
         "其他"
     ]:
 
-        groups = lines[
-            line_name
-        ]
+        groups = lines[line_name]
 
         if not groups:
             continue
@@ -1193,29 +1209,19 @@ def get_boss_names():
             "━━━━━━━━━━\n"
         )
 
-        for minutes in sorted(
-            groups.keys()
-        ):
+        for minutes in sorted(groups.keys()):
 
             if minutes % 60 == 0:
 
-                title = (
-                    f"{minutes // 60}小時"
-                )
+                title = f"{minutes // 60}小時"
 
             else:
 
-                title = (
-                    f"{minutes}分鐘"
-                )
+                title = f"{minutes}分鐘"
 
-            result += (
-                f"\n〔{title}〕\n"
-            )
+            result += f"\n〔{title}〕\n"
 
-            boss_list = groups[
-                minutes
-            ]
+            boss_list = groups[minutes]
 
             for i in range(
                 0,
@@ -1225,9 +1231,7 @@ def get_boss_names():
 
                 result += (
                     "、".join(
-                        boss_list[
-                            i:i + 5
-                        ]
+                        boss_list[i:i + 5]
                     )
                     + "\n"
                 )
@@ -1260,7 +1264,6 @@ def get_help():
         "K 大象H 1022\n"
         "→ 大象H 今天 10:22 死亡\n\n"
 
-
         "【查看】\n\n"
 
         "KB\n"
@@ -1271,7 +1274,6 @@ def get_help():
 
         "王列表\n"
         "→ 查看全部王\n\n"
-
 
         "【HALF 減半模式】\n\n"
 
@@ -1284,10 +1286,9 @@ def get_help():
         "HALF OFF\n"
         "→ 目前群組關閉減半模式\n\n"
 
-        "※ HALF 開啟後，之後新 K 的 BOSS "
-        "重生時間會減半。\n"
-        "※ 不會修改已經記錄的舊重生時間。\n\n"
-
+        "※ 每個 LINE 群組的 HALF 都是獨立的。\n"
+        "※ HALF 只影響開啟後新 K 的紀錄。\n"
+        "※ 不會修改已記錄的舊重生時間。\n\n"
 
         "【新增 / 修改】\n\n"
 
@@ -1310,7 +1311,6 @@ def get_help():
         "刪除王 黑龍1\n"
         "→ 刪除黑龍1\n\n"
 
-
         "【批次新增】\n\n"
 
         "批次新增王 "
@@ -1326,7 +1326,6 @@ def get_help():
 
         "→ 一次新增3隻1線 BOSS，12小時重生\n\n"
 
-
         "【重置】\n\n"
 
         "RESTART\n"
@@ -1341,9 +1340,7 @@ def get_help():
 @app.route("/", methods=["GET"])
 def home():
 
-    return (
-        "BOSS LINE Bot 正常運作！"
-    )
+    return "BOSS LINE Bot 正常運作！"
 
 
 # =========================================================
@@ -1390,9 +1387,7 @@ def handle_message(event):
 
     text = event.message.text.strip()
 
-    chat_id = get_chat_id(
-        event
-    )
+    chat_id = get_chat_id(event)
 
     reply_message = None
 
@@ -1403,9 +1398,7 @@ def handle_message(event):
 
     if text.upper() == "HALF":
 
-        enabled = toggle_half_mode(
-            chat_id
-        )
+        enabled = toggle_half_mode(chat_id)
 
         if enabled:
 
@@ -1430,10 +1423,6 @@ def handle_message(event):
             )
 
 
-    # =====================================================
-    # HALF ON
-    # =====================================================
-
     elif text.upper() == "HALF ON":
 
         set_half_mode(
@@ -1452,10 +1441,6 @@ def handle_message(event):
             )
         )
 
-
-    # =====================================================
-    # HALF OFF
-    # =====================================================
 
     elif text.upper() == "HALF OFF":
 
@@ -1478,9 +1463,7 @@ def handle_message(event):
 
     elif text.upper() == "RESTART":
 
-        deleted_count = restart_bosses(
-            chat_id
-        )
+        deleted_count = restart_bosses(chat_id)
 
         reply_message = TextMessage(
             text=(
@@ -1498,18 +1481,14 @@ def handle_message(event):
 
     elif text.upper() == "KB":
 
-        reply_message = create_kb_table(
-            chat_id
-        )
+        reply_message = create_kb_table(chat_id)
 
 
     # =====================================================
     # 批次新增王
     # =====================================================
 
-    elif text.startswith(
-        "批次新增王 "
-    ):
+    elif text.startswith("批次新增王 "):
 
         content = text[
             len("批次新增王 "):
@@ -1517,16 +1496,12 @@ def handle_message(event):
 
         try:
 
-            boss_text, minutes_text = (
-                content.rsplit(
-                    None,
-                    1
-                )
+            boss_text, minutes_text = content.rsplit(
+                None,
+                1
             )
 
-            minutes = int(
-                minutes_text
-            )
+            minutes = int(minutes_text)
 
             if minutes <= 0:
                 raise ValueError
@@ -1549,29 +1524,20 @@ def handle_message(event):
 
             boss_text = (
                 boss_text
-                .replace(
-                    "，",
-                    "、"
-                )
-                .replace(
-                    ",",
-                    "、"
-                )
+                .replace("，", "、")
+                .replace(",", "、")
             )
 
             boss_names = [
                 name.strip()
-                for name
-                in boss_text.split("、")
+                for name in boss_text.split("、")
                 if name.strip()
             ]
 
             if not boss_names:
 
                 reply_message = TextMessage(
-                    text=(
-                        "❌ 沒有找到 BOSS 名稱。"
-                    )
+                    text="❌ 沒有找到 BOSS 名稱。"
                 )
 
             else:
@@ -1587,16 +1553,9 @@ def handle_message(event):
                     )
 
                     if success:
-
-                        success_list.append(
-                            boss_name
-                        )
-
+                        success_list.append(boss_name)
                     else:
-
-                        exists_list.append(
-                            boss_name
-                        )
+                        exists_list.append(boss_name)
 
                 result = (
                     "✅ 批次新增完成\n\n"
@@ -1608,18 +1567,14 @@ def handle_message(event):
 
                     result += (
                         "\n【新增成功】\n"
-                        + "、".join(
-                            success_list
-                        )
+                        + "、".join(success_list)
                     )
 
                 if exists_list:
 
                     result += (
                         "\n\n【已存在／跳過】\n"
-                        + "、".join(
-                            exists_list
-                        )
+                        + "、".join(exists_list)
                     )
 
                 reply_message = TextMessage(
@@ -1631,9 +1586,7 @@ def handle_message(event):
     # 新增王
     # =====================================================
 
-    elif text.startswith(
-        "新增王 "
-    ):
+    elif text.startswith("新增王 "):
 
         parts = text.split()
 
@@ -1653,9 +1606,7 @@ def handle_message(event):
 
             try:
 
-                minutes = int(
-                    parts[2]
-                )
+                minutes = int(parts[2])
 
                 if minutes <= 0:
                     raise ValueError
@@ -1698,9 +1649,7 @@ def handle_message(event):
     # 修改王
     # =====================================================
 
-    elif text.startswith(
-        "修改王 "
-    ):
+    elif text.startswith("修改王 "):
 
         parts = text.split()
 
@@ -1719,9 +1668,7 @@ def handle_message(event):
 
             try:
 
-                minutes = int(
-                    parts[2]
-                )
+                minutes = int(parts[2])
 
                 if minutes <= 0:
                     raise ValueError
@@ -1746,9 +1693,7 @@ def handle_message(event):
                 else:
 
                     reply_message = TextMessage(
-                        text=(
-                            "❌ 找不到這隻王。"
-                        )
+                        text="❌ 找不到這隻王。"
                     )
 
             except ValueError:
@@ -1765,9 +1710,7 @@ def handle_message(event):
     # 刪除王
     # =====================================================
 
-    elif text.startswith(
-        "刪除王 "
-    ):
+    elif text.startswith("刪除王 "):
 
         parts = text.split()
 
@@ -1798,27 +1741,20 @@ def handle_message(event):
             else:
 
                 reply_message = TextMessage(
-                    text=(
-                        "❌ 找不到這隻王。"
-                    )
+                    text="❌ 找不到這隻王。"
                 )
 
 
     # =====================================================
     # K 王
-    #
-    # K 大象H
-    # K 大象H 1022
     # =====================================================
 
-    elif text.upper().startswith(
-        "K "
-    ):
+    elif text.upper().startswith("K "):
 
         parts = text.split()
 
 
-        # K 王 - 現在時間
+        # 現在時間
         if len(parts) == 2:
 
             input_name = parts[1]
@@ -1859,7 +1795,7 @@ def handle_message(event):
                 )
 
 
-        # K 王 1022 - 手動補登
+        # 手動補登
         elif len(parts) == 3:
 
             input_name = parts[1]
@@ -1956,9 +1892,7 @@ def handle_message(event):
     ]:
 
         reply_message = TextMessage(
-            text=get_boss_list(
-                chat_id
-            )
+            text=get_boss_list(chat_id)
         )
 
 
@@ -1988,26 +1922,18 @@ def handle_message(event):
         "TEST"
     ]:
 
-        half_mode = get_half_mode(
-            chat_id
-        )
+        half_mode = get_half_mode(chat_id)
 
         if half_mode:
-
-            mode_text = (
-                "⚡ HALF 減半模式"
-            )
-
+            mode_text = "⚡ HALF 減半模式"
         else:
-
-            mode_text = (
-                "⏱️ 正常模式"
-            )
+            mode_text = "⏱️ 正常模式"
 
         reply_message = TextMessage(
             text=(
                 "✅ BOSS Bot 正常運作！\n"
-                f"目前：{mode_text}"
+                f"目前：{mode_text}\n"
+                "資料庫：PostgreSQL"
             )
         )
 
