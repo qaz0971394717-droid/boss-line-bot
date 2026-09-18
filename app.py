@@ -144,7 +144,10 @@ DEFAULT_BOSSES = {
 # =========================================================
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(
+        DATABASE_URL,
+        connect_timeout=10
+    )
 
 
 def init_db():
