@@ -467,10 +467,46 @@ def delete_boss(boss_name):
 
 # =========================================================
 # 手動死亡時間
-# 1022 = 今天 10:22
+# 1022   = 今天 10:22:00
+# 102233 = 今天 10:22:33
 # =========================================================
 
 def parse_manual_time(time_text):
+
+    time_text = time_text.strip()
+
+    # 只接受 4 碼 HHMM 或 6 碼 HHMMSS
+    if len(time_text) not in (4, 6):
+        return None
+
+    if not time_text.isdigit():
+        return None
+
+    hour = int(time_text[:2])
+    minute = int(time_text[2:4])
+
+    if len(time_text) == 6:
+        second = int(time_text[4:6])
+    else:
+        second = 0
+
+    if hour < 0 or hour > 23:
+        return None
+
+    if minute < 0 or minute > 59:
+        return None
+
+    if second < 0 or second > 59:
+        return None
+
+    now = datetime.now(TZ)
+
+    return now.replace(
+        hour=hour,
+        minute=minute,
+        second=second,
+        microsecond=0
+    )
 
     time_text = time_text.strip()
 
