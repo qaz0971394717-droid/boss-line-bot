@@ -475,28 +475,26 @@ def parse_manual_time(time_text):
 
     time_text = time_text.strip()
 
-    # 只接受 4 碼 HHMM 或 6 碼 HHMMSS
     if len(time_text) not in (4, 6):
         return None
 
     if not time_text.isdigit():
         return None
 
-    hour = int(time_text[:2])
+    hour = int(time_text[0:2])
     minute = int(time_text[2:4])
+    second = 0
 
     if len(time_text) == 6:
         second = int(time_text[4:6])
-    else:
-        second = 0
 
-    if hour < 0 or hour > 23:
+    if not (0 <= hour <= 23):
         return None
 
-    if minute < 0 or minute > 59:
+    if not (0 <= minute <= 59):
         return None
 
-    if second < 0 or second > 59:
+    if not (0 <= second <= 59):
         return None
 
     now = datetime.now(TZ)
@@ -508,37 +506,10 @@ def parse_manual_time(time_text):
         microsecond=0
     )
 
-    time_text = time_text.strip()
-
-    if len(time_text) != 4:
-        return None
-
-    if not time_text.isdigit():
-        return None
-
-    hour = int(time_text[:2])
-    minute = int(time_text[2:])
-
-    if hour < 0 or hour > 23:
-        return None
-
-    if minute < 0 or minute > 59:
-        return None
-
-    now = datetime.now(TZ)
-
-    return now.replace(
-        hour=hour,
-        minute=minute,
-        second=0,
-        microsecond=0
-    )
-
 
 # =========================================================
 # 記錄死亡
 # =========================================================
-
 def record_kill(
     chat_id,
     boss_name,
