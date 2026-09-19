@@ -1824,9 +1824,11 @@ def handle_message(event):
 
     elif text.startswith("刪除王 "):
 
-        parts = text.split()
+        # 直接取得「刪除王」後面的完整 BOSS 名稱，
+        # 避免密碼驗證後重新處理指令時因空白造成格式判斷錯誤。
+        boss_name = text[len("刪除王 "):].strip()
 
-        if len(parts) != 2:
+        if not boss_name:
 
             reply_message = TextMessage(
                 text=(
@@ -1838,7 +1840,7 @@ def handle_message(event):
         else:
 
             success, real_name = delete_boss(
-                parts[1]
+                boss_name
             )
 
             if success:
