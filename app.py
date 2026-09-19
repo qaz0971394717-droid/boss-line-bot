@@ -607,6 +607,46 @@ def restart_bosses(chat_id):
 
 
 # =========================================================
+# 取消單隻 BOSS 紀錄
+# 只影響目前 LINE 群組 / 聊天室，不刪除固定王表
+# =========================================================
+
+def cancel_boss_record(chat_id, boss_name):
+    boss_key = boss_name.strip().lower()
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT boss_name
+                FROM boss_types
+                WHERE boss_key = %s
+            """, (boss_key,))
+            row = cur.fetchone()
+
+            if not row:
+                return False, None, "boss_not_found"
+
+            real_name = row[0]
+
+            cur.execute("""
+                DELETE FROM boss_kills
+                WHERE chat_id = %s
+                  AND boss_key = %s
+            """, (chat_id, boss_key))
+
+            deleted_count = cur.rowcount
+
+        conn.commit()
+
+        if deleted_count == 0:
+            return False, real_name, "record_not_found"
+
+        return True, real_name, None
+    finally:
+        conn.close()
+
+
+# =========================================================
 # K 王完成卡片
 # =========================================================
 
@@ -1255,98 +1295,84 @@ def get_boss_names():
 # =========================================================
 
 def get_help():
-
     return (
+        "📖 BOSS Bot 使用說明\n\n"
 
-        "📖 BOSS Bot 指令\n\n"
+        "⚔️【報王】\n"
+        "K 王名\n"
+        "→ 以目前時間記錄死亡\n"
+        "例：K 大象H\n\n"
 
-                "【記錄死亡】\n\n"
+        "K 王名 時間\n"
+        "→ 補登指定死亡時間\n"
+        "例：K 大象H 1022\n"
+        "例：K 大象H 102233\n\n"
 
-        "K BOSS名稱+線路\n"
-        "→ 使用現在時間記錄死亡\n\n"
-
-        "K BOSS名稱+線路 4碼時間\n"
-        "→ 手動補登死亡時間（時分）\n\n"
-
-        "K BOSS名稱+線路 6碼時間\n"
-        "→ 手動補登死亡時間（時分秒）\n\n"
-
-        "例如：\n"
-        "K 大象H\n"
-        "→ 使用現在時間死亡\n\n"
-
-        "K 大象H 1022\n"
-        "→ 今天 10:22:00 死亡\n\n"
-
-        "K 大象H 102233\n"
-        "→ 今天 10:22:33 死亡\n\n"
-
-        "【查看】\n\n"
-
+        "📋【查詢】\n"
         "KB\n"
-        "→ 顯示王表\n\n"
-
+        "→ 查看 BOSS 重生時間表\n\n"
         "王\n"
-        "→ 查看目前紀錄\n\n"
-
+        "→ 查看目前已記錄的 BOSS 與剩餘時間\n\n"
         "王列表\n"
-        "→ 查看全部王\n\n"
+        "→ 查看全部 BOSS 與重生週期\n\n"
 
-        "【HALF 減半模式】\n\n"
+        "↩️【報錯取消】\n"
+        "取消 王名\n"
+        "→ 取消目前群組這隻王的 K 王紀錄\n"
+        "例：取消 大象H\n\n"
+        "※ 不會刪除 BOSS\n"
+        "※ 不影響其他群組\n\n"
 
+        "⚡【HALF 模式】\n"
         "HALF\n"
-        "→ 切換目前群組正常 / 減半模式\n\n"
-
+        "→ 切換 HALF 開啟 / 關閉\n\n"
         "HALF ON\n"
-        "→ 目前群組開啟減半模式\n\n"
-
+        "→ 開啟 HALF\n\n"
         "HALF OFF\n"
-        "→ 目前群組關閉減半模式\n\n"
+        "→ 關閉 HALF\n\n"
+        "※ 開啟後，新 K 的 BOSS 重生時間減半\n"
+        "※ 不影響之前已記錄的 BOSS\n\n"
 
-        "※ 每個 LINE 群組的 HALF 都是獨立的。\n"
-        "※ HALF 只影響開啟後新 K 的紀錄。\n"
-        "※ 不會修改已記錄的舊重生時間。\n\n"
-
-        "【新增 / 修改】\n\n"
-
-        "新增王 BOSS名稱+線路 重生分鐘\n"
-        "→ 新增一隻 BOSS\n\n"
-
-        "修改王 BOSS名稱+線路 重生分鐘\n"
-        "→ 修改 BOSS 重生時間\n\n"
-
-        "刪除王 BOSS名稱+線路\n"
-        "→ 刪除這隻 BOSS\n\n"
-
-        "例如：\n"
-        "新增王 黑龍1 720\n"
-        "→ 新增黑龍1，12小時重生\n\n"
-
-        "修改王 黑龍1 1440\n"
-        "→ 黑龍1 改成24小時重生\n\n"
-
-        "刪除王 黑龍1\n"
-        "→ 刪除黑龍1\n\n"
-
-        "【批次新增】\n\n"
-
-        "批次新增王 "
-        "BOSS名稱+線路、BOSS名稱+線路 "
-        "重生分鐘\n"
-
-        "→ 一次新增多隻相同重生時間的 BOSS\n\n"
-
-        "例如：\n"
-
-        "批次新增王 "
-        "伐木1、倒塌1、山峰1 720\n"
-
-        "→ 一次新增3隻1線 BOSS，12小時重生\n\n"
-
-        "【重置】\n\n"
-
+        "🔄【其他】\n"
         "RESTART\n"
-        "→ 清除目前聊天室全部死亡紀錄"
+        "→ 清除目前群組全部 K 王紀錄\n\n"
+        "測試\n"
+        "→ 查看 Bot 是否正常\n\n"
+
+        "🔐 王表管理請輸入：管理指令"
+    )
+
+
+def get_admin_help():
+    return (
+        "🔐 BOSS Bot 管理指令\n\n"
+        "以下操作會修改「全系統共用王表」\n"
+        "所有 LINE 群組都會受到影響。\n\n"
+
+        "➕【新增 BOSS】\n"
+        "新增王 王名 分鐘\n"
+        "例：新增王 黑龍1 720\n\n"
+
+        "➕【批次新增】\n"
+        "批次新增王 王A、王B、王C 分鐘\n"
+        "例：批次新增王 黑龍1、白龍1 720\n\n"
+
+        "✏️【修改 BOSS】\n"
+        "修改王 王名 分鐘\n"
+        "例：修改王 黑龍1 1440\n\n"
+
+        "🗑️【刪除 BOSS】\n"
+        "刪除王 王名\n"
+        "例：刪除王 黑龍1\n\n"
+
+        "🔒【管理權限】\n"
+        "執行以上指令後，Bot 會要求輸入管理密碼。\n"
+        "請在 60 秒內完成驗證。\n"
+        "密碼錯誤或逾時，本次操作會取消。\n\n"
+
+        "⚠️【注意】\n"
+        "新增王 / 修改王 / 刪除王\n"
+        "會影響所有使用此 Bot 的 LINE 群組。"
     )
 
 
@@ -1860,6 +1886,41 @@ def handle_message(event):
 
 
     # =====================================================
+    # 取消單隻 BOSS 紀錄
+    # =====================================================
+
+    elif text.startswith("取消 "):
+        boss_name = text[len("取消 "):].strip()
+
+        if not boss_name:
+            reply_message = TextMessage(
+                text="❌ 格式錯誤\n請輸入：取消 王名\n例如：取消 大象H"
+            )
+        else:
+            success, real_name, error = cancel_boss_record(chat_id, boss_name)
+
+            if success:
+                reply_message = TextMessage(
+                    text=(
+                        "↩️ 已取消 BOSS 紀錄\n"
+                        f"{real_name}\n\n"
+                        "※ 只取消目前群組的紀錄，固定王表不受影響。"
+                    )
+                )
+            elif error == "boss_not_found":
+                reply_message = TextMessage(
+                    text=(
+                        f"❌ 找不到 BOSS：{boss_name}\n"
+                        "輸入「王列表」查看完整名單。"
+                    )
+                )
+            else:
+                reply_message = TextMessage(
+                    text=f"ℹ️ {real_name} 目前沒有 K 王紀錄，不需要取消。"
+                )
+
+
+    # =====================================================
     # K 王
     # =====================================================
 
@@ -2009,6 +2070,17 @@ def handle_message(event):
 
         reply_message = TextMessage(
             text=get_boss_list(chat_id)
+        )
+
+
+    # =====================================================
+    # 管理指令
+    # =====================================================
+
+    elif text == "管理指令":
+
+        reply_message = TextMessage(
+            text=get_admin_help()
         )
 
 
