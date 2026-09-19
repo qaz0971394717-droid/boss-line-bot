@@ -30,11 +30,17 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 DATABASE_URL = os.environ["DATABASE_URL"]
+ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 TZ = ZoneInfo("Asia/Taipei")
+
+# =========================================================
+# 管理員密碼驗證暫存
+# =========================================================
+PENDING_ADMIN_ACTIONS = {}
 
 
 # =========================================================
@@ -1401,6 +1407,101 @@ def handle_message(event):
     chat_id = get_chat_id(event)
 
     reply_message = None
+
+    # =====================================================
+    # 管理員密碼驗證
+    # 新增王 / 批次新增王 / 修改王 / 刪除王
+    # =====================================================
+
+    admin_verified = False
+
+    # 如果目前聊天室正在等待密碼，這一則訊息就視為密碼
+    if chat_id in PENDING_ADMIN_ACTIONS:
+
+        pending = PENDING_ADMIN_ACTIONS[chat_id]
+
+        # 超過 60 秒，自動取消
+        if datetime.now(TZ) - pending["time"] > timedelta(seconds=60):
+
+            del PENDING_ADMIN_ACTIONS[chat_id]
+
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[
+                            TextMessage(
+                                text=(
+                                    "⏰ 管理驗證已逾時。\n"
+                                    "請重新輸入管理指令。"
+                                )
+                            )
+                        ]
+                    )
+                )
+            return
+
+        # 密碼正確：恢復原本的管理指令，繼續往下執行
+        elif text == ADMIN_PASSWORD:
+
+            text = pending["command"]
+            del PENDING_ADMIN_ACTIONS[chat_id]
+            admin_verified = True
+
+        # 密碼錯誤：取消此次操作
+        else:
+
+            del PENDING_ADMIN_ACTIONS[chat_id]
+
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[
+                            TextMessage(
+                                text=(
+                                    "❌ 管理密碼錯誤。\n"
+                                    "此次操作已取消。"
+                                )
+                            )
+                        ]
+                    )
+                )
+            return
+
+    # 管理指令第一次輸入時，先暫存並要求密碼
+    is_admin_command = (
+        text.startswith("新增王 ")
+        or text.startswith("批次新增王 ")
+        or text.startswith("修改王 ")
+        or text.startswith("刪除王 ")
+    )
+
+    if is_admin_command and not admin_verified:
+
+        PENDING_ADMIN_ACTIONS[chat_id] = {
+            "command": text,
+            "time": datetime.now(TZ)
+        }
+
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[
+                        TextMessage(
+                            text=(
+                                "🔒 此操作需要管理權限。\n"
+                                "請在 60 秒內輸入管理密碼。"
+                            )
+                        )
+                    ]
+                )
+            )
+        return
 
 
     # =====================================================
