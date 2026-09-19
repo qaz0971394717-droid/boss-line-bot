@@ -285,10 +285,10 @@ def sync_boss_reminder(chat_id, boss_name, respawn_time):
     return reminder_request(
         "/schedule",
         {
-            "chat_id": chat_id,
-            "boss_key": boss_name.lower(),
-            "boss_name": boss_name,
-            "respawn_time": respawn_time.astimezone(TZ).isoformat(),
+            "chatId": chat_id,
+            "bossKey": boss_name.lower(),
+            "bossName": boss_name,
+            "respawnAt": respawn_time.astimezone(TZ).isoformat(),
         },
     )
 
@@ -297,8 +297,8 @@ def cancel_boss_reminder(chat_id, boss_name):
     return reminder_request(
         "/cancel",
         {
-            "chat_id": chat_id,
-            "boss_key": boss_name.lower(),
+            "chatId": chat_id,
+            "bossKey": boss_name.lower(),
         },
     )
 
@@ -307,7 +307,7 @@ def cancel_all_boss_reminders(chat_id):
     return reminder_request(
         "/cancel-all",
         {
-            "chat_id": chat_id,
+            "chatId": chat_id,
         },
     )
 
