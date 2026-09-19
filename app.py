@@ -563,6 +563,16 @@ def delete_boss(boss_name):
 
             real_name = row[0]
 
+            # 先記住哪些聊天室有這隻王的 K 紀錄，
+            # DB 刪除後再逐一取消 Cloudflare Durable Object 排程。
+            cur.execute("""
+                SELECT DISTINCT chat_id
+                FROM boss_kills
+                WHERE boss_key = %s
+            """, (boss_key,))
+
+            affected_chat_ids = [row[0] for row in cur.fetchall()]
+
             cur.execute("""
                 DELETE FROM boss_types
                 WHERE boss_key = %s
@@ -574,6 +584,9 @@ def delete_boss(boss_name):
             """, (boss_key,))
 
         conn.commit()
+
+        for affected_chat_id in affected_chat_ids:
+            cancel_boss_reminder(affected_chat_id, real_name)
 
         return True, real_name
 
@@ -709,6 +722,17 @@ def restart_bosses(chat_id):
     try:
         with conn.cursor() as cur:
 
+            # Cloudflare 的 /cancel 是以 chatId + bossKey 定位 Durable Object。
+            # 所以 RESTART 前先取得目前聊天室所有 boss_name，
+            # DB 清空後再逐隻取消排程，不再呼叫不存在的 /cancel-all。
+            cur.execute("""
+                SELECT boss_name
+                FROM boss_kills
+                WHERE chat_id = %s
+            """, (chat_id,))
+
+            boss_names = [row[0] for row in cur.fetchall()]
+
             cur.execute("""
                 DELETE FROM boss_kills
                 WHERE chat_id = %s
@@ -718,8 +742,8 @@ def restart_bosses(chat_id):
 
         conn.commit()
 
-        # RESTART：同步取消目前群組在 Cloudflare 的全部提醒
-        cancel_all_boss_reminders(chat_id)
+        for boss_name in boss_names:
+            cancel_boss_reminder(chat_id, boss_name)
 
         return deleted_count
 
