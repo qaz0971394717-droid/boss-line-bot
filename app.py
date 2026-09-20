@@ -1,5 +1,4 @@
 import os
-import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -32,8 +31,6 @@ CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
-REMINDER_WORKER_URL = os.environ.get("REMINDER_WORKER_URL", "").rstrip("/")
-REMINDER_API_KEY = os.environ.get("REMINDER_API_KEY", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -243,112 +240,6 @@ def get_chat_id(event):
 
     return "unknown"
 
-
-
-# =========================================================
-# Cloudflare BOSS 提醒同步
-# =========================================================
-
-def reminder_request(path, payload=None):
-    """呼叫 Cloudflare Worker。同步失敗不影響 LINE Bot 原本的 K/取消功能。"""
-    if not REMINDER_WORKER_URL or not REMINDER_API_KEY:
-        print("[REMINDER] REMINDER_WORKER_URL / REMINDER_API_KEY 尚未設定")
-        return False
-
-    url = f"{REMINDER_WORKER_URL}{path}"
-    headers = {
-        "Authorization": f"Bearer {REMINDER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        response = requests.post(
-            url,
-            json=payload or {},
-            headers=headers,
-            timeout=10,
-        )
-        if 200 <= response.status_code < 300:
-            return True
-
-        print(
-            f"[REMINDER] {path} failed: "
-            f"{response.status_code} {response.text[:500]}"
-        )
-    except Exception as exc:
-        print(f"[REMINDER] {path} error: {exc}")
-
-    return False
-
-
-def sync_boss_reminder(chat_id, boss_name, respawn_time):
-    return reminder_request(
-        "/schedule",
-        {
-            "chatId": chat_id,
-            "bossKey": boss_name.lower(),
-            "bossName": boss_name,
-            "respawnAt": respawn_time.astimezone(TZ).isoformat(),
-        },
-    )
-
-
-def cancel_boss_reminder(chat_id, boss_name):
-    return reminder_request(
-        "/cancel",
-        {
-            "chatId": chat_id,
-            "bossKey": boss_name.lower(),
-        },
-    )
-
-
-def cancel_all_boss_reminders(chat_id):
-    return reminder_request(
-        "/cancel-all",
-        {
-            "chatId": chat_id,
-        },
-    )
-
-
-def sync_existing_boss_reminders():
-    """Render 每次啟動時，把 DB 中尚未重生的 KB 紀錄重新同步到 Cloudflare。"""
-    if not REMINDER_WORKER_URL or not REMINDER_API_KEY:
-        print("[REMINDER] skip startup sync: worker env not configured")
-        return
-
-    conn = get_db()
-
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT
-                    chat_id,
-                    boss_name,
-                    respawn_time
-                FROM boss_kills
-                WHERE respawn_time > NOW()
-                ORDER BY respawn_time ASC
-            """)
-            rows = cur.fetchall()
-    finally:
-        conn.close()
-
-    success_count = 0
-
-    for row in rows:
-        if sync_boss_reminder(
-            row["chat_id"],
-            row["boss_name"],
-            row["respawn_time"],
-        ):
-            success_count += 1
-
-    print(
-        f"[REMINDER] startup sync complete: "
-        f"{success_count}/{len(rows)}"
-    )
 
 
 # =========================================================
@@ -563,16 +454,6 @@ def delete_boss(boss_name):
 
             real_name = row[0]
 
-            # 先記住哪些聊天室有這隻王的 K 紀錄，
-            # DB 刪除後再逐一取消 Cloudflare Durable Object 排程。
-            cur.execute("""
-                SELECT DISTINCT chat_id
-                FROM boss_kills
-                WHERE boss_key = %s
-            """, (boss_key,))
-
-            affected_chat_ids = [row[0] for row in cur.fetchall()]
-
             cur.execute("""
                 DELETE FROM boss_types
                 WHERE boss_key = %s
@@ -584,9 +465,6 @@ def delete_boss(boss_name):
             """, (boss_key,))
 
         conn.commit()
-
-        for affected_chat_id in affected_chat_ids:
-            cancel_boss_reminder(affected_chat_id, real_name)
 
         return True, real_name
 
@@ -694,14 +572,6 @@ def record_kill(
     finally:
         conn.close()
 
-    # 新 K / 重新 K：Cloudflare 以 chat_id + boss_key 為同一筆排程，
-    # 因此重新 K 時會直接更新成新的重生時間。
-    sync_boss_reminder(
-        chat_id,
-        boss_name,
-        respawn_time
-    )
-
     return (
         kill_time,
         respawn_time,
@@ -722,17 +592,6 @@ def restart_bosses(chat_id):
     try:
         with conn.cursor() as cur:
 
-            # Cloudflare 的 /cancel 是以 chatId + bossKey 定位 Durable Object。
-            # 所以 RESTART 前先取得目前聊天室所有 boss_name，
-            # DB 清空後再逐隻取消排程，不再呼叫不存在的 /cancel-all。
-            cur.execute("""
-                SELECT boss_name
-                FROM boss_kills
-                WHERE chat_id = %s
-            """, (chat_id,))
-
-            boss_names = [row[0] for row in cur.fetchall()]
-
             cur.execute("""
                 DELETE FROM boss_kills
                 WHERE chat_id = %s
@@ -741,9 +600,6 @@ def restart_bosses(chat_id):
             deleted_count = cur.rowcount
 
         conn.commit()
-
-        for boss_name in boss_names:
-            cancel_boss_reminder(chat_id, boss_name)
 
         return deleted_count
 
@@ -785,9 +641,6 @@ def cancel_boss_record(chat_id, boss_name):
 
         if deleted_count == 0:
             return False, real_name, "record_not_found"
-
-        # 取消王：同步取消 Cloudflare 的這隻王提醒
-        cancel_boss_reminder(chat_id, real_name)
 
         return True, real_name, None
     finally:
@@ -2298,14 +2151,6 @@ def handle_message(event):
             )
 
 
-# =========================================================
-# 啟動前同步目前 KB
-# =========================================================
-try:
-    sync_existing_boss_reminders()
-except Exception as exc:
-    # 提醒服務故障不能讓主 LINE Bot 無法啟動
-    print(f"[REMINDER] startup sync error: {exc}")
 
 
 # =========================================================
