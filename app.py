@@ -1,4 +1,5 @@
 import os
+import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -31,6 +32,8 @@ CHANNEL_ACCESS_TOKEN = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
 CHANNEL_SECRET = os.environ["LINE_CHANNEL_SECRET"]
 DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
+REMINDER_WORKER_URL = os.environ.get("REMINDER_WORKER_URL", "").rstrip("/")
+REMINDER_API_KEY = os.environ.get("REMINDER_API_KEY", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -240,6 +243,63 @@ def get_chat_id(event):
 
     return "unknown"
 
+
+
+# =========================================================
+# Cloudflare / Discord BOSS 提醒
+# LINE 只負責報王；Cloudflare 到時間後送 Discord Webhook
+# =========================================================
+
+def reminder_request(path, payload):
+    if not REMINDER_WORKER_URL or not REMINDER_API_KEY:
+        print("Reminder skipped: REMINDER_WORKER_URL / REMINDER_API_KEY not configured")
+        return False
+
+    try:
+        response = requests.post(
+            f"{REMINDER_WORKER_URL}{path}",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {REMINDER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=10,
+        )
+
+        if not response.ok:
+            print(
+                f"Reminder request failed: {response.status_code} "
+                f"{response.text}"
+            )
+            return False
+
+        return True
+
+    except Exception as exc:
+        print(f"Reminder request error: {exc}")
+        return False
+
+
+def sync_boss_reminder(chat_id, boss_name, respawn_time):
+    return reminder_request(
+        "/schedule",
+        {
+            "chatId": chat_id,
+            "bossKey": boss_name.lower(),
+            "bossName": boss_name,
+            "respawnAt": respawn_time.astimezone(TZ).isoformat(),
+        },
+    )
+
+
+def cancel_boss_reminder(chat_id, boss_name):
+    return reminder_request(
+        "/cancel",
+        {
+            "chatId": chat_id,
+            "bossKey": boss_name.lower(),
+        },
+    )
 
 
 # =========================================================
@@ -455,6 +515,17 @@ def delete_boss(boss_name):
             real_name = row[0]
 
             cur.execute("""
+                SELECT chat_id
+                FROM boss_kills
+                WHERE boss_key = %s
+            """, (boss_key,))
+
+            affected_chat_ids = [
+                item[0]
+                for item in cur.fetchall()
+            ]
+
+            cur.execute("""
                 DELETE FROM boss_types
                 WHERE boss_key = %s
             """, (boss_key,))
@@ -465,6 +536,12 @@ def delete_boss(boss_name):
             """, (boss_key,))
 
         conn.commit()
+
+        for affected_chat_id in affected_chat_ids:
+            cancel_boss_reminder(
+                affected_chat_id,
+                real_name
+            )
 
         return True, real_name
 
@@ -572,6 +649,14 @@ def record_kill(
     finally:
         conn.close()
 
+    # 建立 / 更新 Cloudflare 排程。
+    # Cloudflare Worker 會在 5 分鐘、1 分鐘前送到 Discord。
+    sync_boss_reminder(
+        chat_id,
+        boss_name,
+        respawn_time
+    )
+
     return (
         kill_time,
         respawn_time,
@@ -593,6 +678,17 @@ def restart_bosses(chat_id):
         with conn.cursor() as cur:
 
             cur.execute("""
+                SELECT boss_name
+                FROM boss_kills
+                WHERE chat_id = %s
+            """, (chat_id,))
+
+            boss_names = [
+                row[0]
+                for row in cur.fetchall()
+            ]
+
+            cur.execute("""
                 DELETE FROM boss_kills
                 WHERE chat_id = %s
             """, (chat_id,))
@@ -601,10 +697,16 @@ def restart_bosses(chat_id):
 
         conn.commit()
 
-        return deleted_count
-
     finally:
         conn.close()
+
+    for boss_name in boss_names:
+        cancel_boss_reminder(
+            chat_id,
+            boss_name
+        )
+
+    return deleted_count
 
 
 # =========================================================
@@ -641,6 +743,11 @@ def cancel_boss_record(chat_id, boss_name):
 
         if deleted_count == 0:
             return False, real_name, "record_not_found"
+
+        cancel_boss_reminder(
+            chat_id,
+            real_name
+        )
 
         return True, real_name, None
     finally:
