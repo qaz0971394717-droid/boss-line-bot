@@ -1639,10 +1639,22 @@ def handle_message(event):
 
 
     # =====================================================
+    # 群組 ID
+    # =====================================================
+
+    if text in ["群組ID", "群組id", "GROUPID", "groupid"]:
+        reply_message = TextMessage(
+            text=(
+                "🆔 目前聊天室 ID\n\n"
+                f"{chat_id}"
+            )
+        )
+
+    # =====================================================
     # HALF
     # =====================================================
 
-    if text.upper() == "HALF":
+    elif text.upper() == "HALF":
 
         enabled = toggle_half_mode(chat_id)
 
