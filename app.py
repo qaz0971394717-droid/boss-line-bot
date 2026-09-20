@@ -666,6 +666,51 @@ def record_kill(
 
 
 # =========================================================
+# 同步目前聊天室既有 BOSS 到 Cloudflare / Discord
+# 只同步尚未到重生時間的紀錄
+# =========================================================
+
+def sync_existing_reminders(chat_id):
+    now = datetime.now(TZ)
+    conn = get_db()
+
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    boss_name,
+                    respawn_time
+                FROM boss_kills
+                WHERE chat_id = %s
+                  AND respawn_time > %s
+                ORDER BY respawn_time ASC
+            """, (
+                chat_id,
+                now
+            ))
+
+            rows = cur.fetchall()
+
+    finally:
+        conn.close()
+
+    success_count = 0
+    failed_count = 0
+
+    for row in rows:
+        if sync_boss_reminder(
+            chat_id,
+            row["boss_name"],
+            row["respawn_time"]
+        ):
+            success_count += 1
+        else:
+            failed_count += 1
+
+    return success_count, failed_count
+
+
+# =========================================================
 # RESTART
 # 只清除目前聊天室死亡紀錄
 # =========================================================
@@ -1649,6 +1694,36 @@ def handle_message(event):
                 f"{chat_id}"
             )
         )
+
+    # =====================================================
+    # 同步既有 BOSS Discord 提醒
+    # =====================================================
+
+    elif text == "同步提醒":
+        success_count, failed_count = sync_existing_reminders(chat_id)
+
+        if success_count == 0 and failed_count == 0:
+            reply_message = TextMessage(
+                text=(
+                    "ℹ️ 目前沒有需要同步的 BOSS。\n"
+                    "只會同步尚未到重生時間的 KB 紀錄。"
+                )
+            )
+        else:
+            result = (
+                "🔄 Discord 提醒同步完成\n\n"
+                f"✅ 成功：{success_count} 隻"
+            )
+
+            if failed_count:
+                result += f"\n❌ 失敗：{failed_count} 隻"
+
+            result += (
+                "\n\n之後會依原本的重生時間，"
+                "在 5 分鐘 / 1 分鐘前提醒。"
+            )
+
+            reply_message = TextMessage(text=result)
 
     # =====================================================
     # HALF
