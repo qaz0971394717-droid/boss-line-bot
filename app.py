@@ -1570,68 +1570,51 @@ def build_discord_kb_content(chat_id):
     bosses = get_current_bosses(chat_id)
 
     if not bosses:
-        return {
-            "content": "📭 目前沒有 BOSS 紀錄。",
-            "allowed_mentions": {"parse": []}
-        }
+        return "📋 **HIT2 BOSS 重生時間表**\n\n目前沒有 BOSS 紀錄。"
 
     date_groups = {}
+
     for item in bosses:
         respawn = item["respawn_time"].astimezone(TZ)
-        date_groups.setdefault(respawn.strftime("%Y-%m-%d"), []).append(item)
+        date_groups.setdefault(
+            respawn.strftime("%Y-%m-%d"),
+            []
+        ).append(item)
 
-    embeds = []
+    lines = [
+        "👑 **HIT2 BOSS 重生時間表**",
+        "━━━━━━━━━━━━━━━━━━",
+        ""
+    ]
 
     for date_key in sorted(date_groups):
         items = date_groups[date_key]
         sample_date = items[0]["respawn_time"].astimezone(TZ)
 
-        # 將同一天的 BOSS 平均切成左右兩欄，縮短整體高度。
-        split_at = (len(items) + 1) // 2
-        left_items = items[:split_at]
-        right_items = items[split_at:]
+        lines.append(
+            f"📅 **{sample_date.strftime('%m/%d')}（週{weekday_tw(sample_date)}）**"
+        )
+        lines.append("```")
+        lines.append("時間       BOSS")
+        lines.append("────────  ──────────")
 
-        def make_column(column_items):
-            if not column_items:
-                return "—"
+        for item in items:
+            respawn = item["respawn_time"].astimezone(TZ)
+            time_text = respawn.strftime("%H:%M:%S")
+            boss_name = str(item["boss_name"])
+            lines.append(f"{time_text}   {boss_name}")
 
-            rows = []
-            for item in column_items:
-                respawn = item["respawn_time"].astimezone(TZ)
-                rows.append(
-                    f"`{respawn.strftime('%H:%M:%S')}`  **{item['boss_name']}**"
-                )
-            return "\n".join(rows)
+        lines.append("```")
+        lines.append("")
 
-        embeds.append({
-            "title": f"📅 {sample_date.strftime('%m/%d')}（週{weekday_tw(sample_date)}）",
-            "description": f"共 **{len(items)}** 隻 BOSS",
-            "color": 0x5865F2,
-            "fields": [
-                {
-                    "name": "🕐 時間　｜　👑 BOSS",
-                    "value": make_column(left_items),
-                    "inline": True
-                },
-                {
-                    "name": "🕐 時間　｜　👑 BOSS",
-                    "value": make_column(right_items),
-                    "inline": True
-                }
-            ],
-            "footer": {
-                "text": "HIT2 BOSS Tracker • Asia/Taipei"
-            }
-        })
+    lines.append("🕒 時區：Asia/Taipei")
 
-    # Discord 一次最多 10 個 embeds；一般王表遠低於此限制。
-    embeds = embeds[:10]
+    content = "\n".join(lines)
 
-    return {
-        "content": "## 👑 HIT2 BOSS 重生時間表",
-        "embeds": embeds,
-        "allowed_mentions": {"parse": []}
-    }
+    if len(content) > 2000:
+        content = content[:1950] + "\n\n…資料較多，已省略部分項目。"
+
+    return content
 
 
 @app.route("/discord/interactions", methods=["POST"])
@@ -1659,7 +1642,8 @@ def discord_interactions():
             return jsonify({
                 "type": 4,
                 "data": {
-                    **content
+                    "content": content,
+                    "allowed_mentions": {"parse": []}
                 }
             })
 
