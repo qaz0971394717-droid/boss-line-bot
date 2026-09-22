@@ -1568,28 +1568,52 @@ def verify_discord_request():
 
 def build_discord_kb_content(chat_id):
     bosses = get_current_bosses(chat_id)
+
     if not bosses:
-        return "📋 目前沒有 BOSS 紀錄。"
+        return "📋 **HIT2 BOSS 重生時間表**\n\n目前沒有 BOSS 紀錄。"
 
     date_groups = {}
+
     for item in bosses:
         respawn = item["respawn_time"].astimezone(TZ)
-        date_groups.setdefault(respawn.strftime("%Y-%m-%d"), []).append(item)
+        date_groups.setdefault(
+            respawn.strftime("%Y-%m-%d"),
+            []
+        ).append(item)
 
-    lines = ["📋 **BOSS 重生時間表**", ""]
+    lines = [
+        "👑 **HIT2 BOSS 重生時間表**",
+        "━━━━━━━━━━━━━━━━━━",
+        ""
+    ]
+
     for date_key in sorted(date_groups):
         items = date_groups[date_key]
         sample_date = items[0]["respawn_time"].astimezone(TZ)
-        lines.append(f"**{sample_date.strftime('%m/%d')} 週{weekday_tw(sample_date)}**")
+
+        lines.append(
+            f"📅 **{sample_date.strftime('%m/%d')}（週{weekday_tw(sample_date)}）**"
+        )
+        lines.append("```")
+        lines.append("時間       BOSS")
+        lines.append("────────  ──────────")
+
         for item in items:
             respawn = item["respawn_time"].astimezone(TZ)
-            lines.append(f"`{respawn.strftime('%H:%M:%S')}`　{item['boss_name']}")
+            time_text = respawn.strftime("%H:%M:%S")
+            boss_name = str(item["boss_name"])
+            lines.append(f"{time_text}   {boss_name}")
+
+        lines.append("```")
         lines.append("")
-    lines.append("時區：Asia/Taipei")
+
+    lines.append("🕒 時區：Asia/Taipei")
 
     content = "\n".join(lines)
+
     if len(content) > 2000:
-        content = content[:1960] + "\n\n…資料較多，已省略部分項目。"
+        content = content[:1950] + "\n\n…資料較多，已省略部分項目。"
+
     return content
 
 
