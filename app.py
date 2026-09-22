@@ -2418,7 +2418,7 @@ def create_discord_kb_embeds(chat_id):
 
 class BossDiscordClient(discord.Client):
     async def on_ready(self):
-        print(f"Discord Bot logged in as {self.user}")
+        print(f"[DISCORD] READY: logged in as {self.user} (id={self.user.id})", flush=True)
 
     async def on_message(self, message):
         if message.author.bot:
@@ -2442,27 +2442,52 @@ class BossDiscordClient(discord.Client):
                 await message.channel.send(embed=embed)
 
         except Exception as exc:
-            print(f"Discord KB error: {exc}")
+            print(f"[DISCORD] KB ERROR: {type(exc).__name__}: {exc}", flush=True)
             await message.channel.send("❌ KB 查詢失敗，請稍後再試。")
 
 
 def run_discord_bot():
+    print("[DISCORD] Background thread entered.", flush=True)
+
     if not DISCORD_BOT_TOKEN:
-        print("Discord Bot skipped: DISCORD_BOT_TOKEN not configured")
+        print("[DISCORD] ERROR: DISCORD_BOT_TOKEN is missing.", flush=True)
         return
+
+    print(
+        f"[DISCORD] Token found (length={len(DISCORD_BOT_TOKEN)}). Preparing client...",
+        flush=True,
+    )
 
     intents = discord.Intents.default()
     intents.message_content = True
     client = BossDiscordClient(intents=intents)
 
     try:
+        print("[DISCORD] Connecting to Discord Gateway...", flush=True)
         asyncio.run(client.start(DISCORD_BOT_TOKEN))
+    except discord.LoginFailure:
+        print(
+            "[DISCORD] ERROR: Discord rejected the bot token (LoginFailure). "
+            "Reset the token in Discord Developer Portal and update DISCORD_BOT_TOKEN in Render.",
+            flush=True,
+        )
+    except discord.PrivilegedIntentsRequired:
+        print(
+            "[DISCORD] ERROR: Message Content Intent is not enabled for this bot.",
+            flush=True,
+        )
     except Exception as exc:
-        print(f"Discord Bot stopped: {exc}")
+        print(
+            f"[DISCORD] ERROR: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
 
 
 def start_discord_bot():
+    print("[DISCORD] start_discord_bot() called.", flush=True)
+
     if not DISCORD_BOT_TOKEN:
+        print("[DISCORD] ERROR: DISCORD_BOT_TOKEN is missing; bot will not start.", flush=True)
         return
 
     thread = threading.Thread(
@@ -2471,6 +2496,7 @@ def start_discord_bot():
         daemon=True,
     )
     thread.start()
+    print("[DISCORD] Background thread started.", flush=True)
 
 
 start_discord_bot()
