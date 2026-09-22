@@ -1,15 +1,14 @@
 import os
 import requests
-import threading
-import asyncio
-import discord
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from nacl.signing import VerifyKey
+from nacl.exceptions import BadSignatureError
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -37,7 +36,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 REMINDER_WORKER_URL = os.environ.get("REMINDER_WORKER_URL", "").rstrip("/")
 REMINDER_API_KEY = os.environ.get("REMINDER_API_KEY", "")
-DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+DISCORD_PUBLIC_KEY = os.environ.get("DISCORD_PUBLIC_KEY", "")
 DISCORD_KB_LINE_CHAT_ID = os.environ.get("DISCORD_KB_LINE_CHAT_ID", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -1544,6 +1543,95 @@ def home():
     return "BOSS LINE Bot 正常運作！"
 
 
+
+# =========================================================
+# Discord /kb Slash Command（HTTP Interactions）
+# 不使用 Discord Gateway；Bot 不需要常駐上線。
+# =========================================================
+
+def verify_discord_request():
+    if not DISCORD_PUBLIC_KEY:
+        return False
+    signature = request.headers.get("X-Signature-Ed25519", "")
+    timestamp = request.headers.get("X-Signature-Timestamp", "")
+    if not signature or not timestamp:
+        return False
+    try:
+        VerifyKey(bytes.fromhex(DISCORD_PUBLIC_KEY)).verify(
+            timestamp.encode("utf-8") + request.get_data(),
+            bytes.fromhex(signature)
+        )
+        return True
+    except (BadSignatureError, ValueError):
+        return False
+
+
+def build_discord_kb_content(chat_id):
+    bosses = get_current_bosses(chat_id)
+    if not bosses:
+        return "📋 目前沒有 BOSS 紀錄。"
+
+    date_groups = {}
+    for item in bosses:
+        respawn = item["respawn_time"].astimezone(TZ)
+        date_groups.setdefault(respawn.strftime("%Y-%m-%d"), []).append(item)
+
+    lines = ["📋 **BOSS 重生時間表**", ""]
+    for date_key in sorted(date_groups):
+        items = date_groups[date_key]
+        sample_date = items[0]["respawn_time"].astimezone(TZ)
+        lines.append(f"**{sample_date.strftime('%m/%d')} 週{weekday_tw(sample_date)}**")
+        for item in items:
+            respawn = item["respawn_time"].astimezone(TZ)
+            lines.append(f"`{respawn.strftime('%H:%M:%S')}`　{item['boss_name']}")
+        lines.append("")
+    lines.append("時區：Asia/Taipei")
+
+    content = "\n".join(lines)
+    if len(content) > 2000:
+        content = content[:1960] + "\n\n…資料較多，已省略部分項目。"
+    return content
+
+
+@app.route("/discord/interactions", methods=["POST"])
+def discord_interactions():
+    if not verify_discord_request():
+        abort(401)
+
+    payload = request.get_json(silent=True) or {}
+
+    if payload.get("type") == 1:
+        return jsonify({"type": 1})
+
+    if payload.get("type") == 2:
+        command_name = payload.get("data", {}).get("name", "").strip().lower()
+        if command_name == "kb":
+            if not DISCORD_KB_LINE_CHAT_ID:
+                content = "❌ DISCORD_KB_LINE_CHAT_ID 尚未設定。"
+            else:
+                try:
+                    content = build_discord_kb_content(DISCORD_KB_LINE_CHAT_ID)
+                except Exception as exc:
+                    print(f"Discord /kb error: {type(exc).__name__}: {exc}", flush=True)
+                    content = "❌ 讀取 BOSS 資料失敗，請稍後再試。"
+
+            return jsonify({
+                "type": 4,
+                "data": {
+                    "content": content,
+                    "allowed_mentions": {"parse": []}
+                }
+            })
+
+    return jsonify({
+        "type": 4,
+        "data": {
+            "content": "❌ 不支援的 Discord 指令。",
+            "flags": 64
+        }
+    })
+
+
 # =========================================================
 # Webhook
 # =========================================================
@@ -2354,169 +2442,3 @@ def handle_message(event):
 # =========================================================
 # Discord KB 查詢
 # Discord 只提供 KB；資料來源固定對應 LINE 群組
-# =========================================================
-
-def create_discord_kb_embeds(chat_id):
-    bosses = get_current_bosses(chat_id)
-
-    if not bosses:
-        return []
-
-    date_groups = {}
-    for item in bosses:
-        respawn = item["respawn_time"].astimezone(TZ)
-        date_key = respawn.strftime("%Y-%m-%d")
-        date_groups.setdefault(date_key, []).append(item)
-
-    embeds = []
-    current_lines = []
-    current_count = 0
-
-    def flush_embed():
-        nonlocal current_lines, current_count
-        if not current_lines:
-            return
-
-        embed = discord.Embed(
-            title="📋 BOSS 重生時間表",
-            description="\n".join(current_lines),
-        )
-        embed.set_footer(text="時區：Asia/Taipei｜資料來源：LINE 群組")
-        embeds.append(embed)
-        current_lines = []
-        current_count = 0
-
-    for date_key in sorted(date_groups.keys()):
-        items = date_groups[date_key]
-        sample_date = items[0]["respawn_time"].astimezone(TZ)
-        header = f"**📅 {sample_date.strftime('%m/%d')} 週{weekday_tw(sample_date)}**"
-
-        # 每張 Embed 控制在約 20 隻，避免 Discord 內容上限。
-        if current_count and current_count + len(items) > 20:
-            flush_embed()
-
-        current_lines.append(header)
-        for item in items:
-            respawn = item["respawn_time"].astimezone(TZ)
-            current_lines.append(
-                f"`{respawn.strftime('%H:%M:%S')}`  **{item['boss_name']}**"
-            )
-            current_count += 1
-        current_lines.append("")
-
-    flush_embed()
-
-    total = len(embeds)
-    if total > 1:
-        for index, embed in enumerate(embeds, start=1):
-            embed.set_footer(
-                text=f"時區：Asia/Taipei｜資料來源：LINE 群組｜{index}/{total}"
-            )
-
-    return embeds
-
-
-class BossDiscordClient(discord.Client):
-    async def on_ready(self):
-        print(f"[DISCORD] READY: logged in as {self.user} (id={self.user.id})", flush=True)
-
-    async def on_message(self, message):
-        if message.author.bot:
-            return
-
-        if message.content.strip().upper() != "KB":
-            return
-
-        if not DISCORD_KB_LINE_CHAT_ID:
-            await message.channel.send("❌ DISCORD_KB_LINE_CHAT_ID 尚未設定。")
-            return
-
-        try:
-            embeds = create_discord_kb_embeds(DISCORD_KB_LINE_CHAT_ID)
-
-            if not embeds:
-                await message.channel.send("📋 目前沒有 BOSS 紀錄。")
-                return
-
-            for embed in embeds:
-                await message.channel.send(embed=embed)
-
-        except Exception as exc:
-            print(f"[DISCORD] KB ERROR: {type(exc).__name__}: {exc}", flush=True)
-            await message.channel.send("❌ KB 查詢失敗，請稍後再試。")
-
-
-def run_discord_bot():
-    print("[DISCORD] Background thread entered.", flush=True)
-
-    if not DISCORD_BOT_TOKEN:
-        print("[DISCORD] ERROR: DISCORD_BOT_TOKEN is missing.", flush=True)
-        return
-
-    print(
-        f"[DISCORD] Token found (length={len(DISCORD_BOT_TOKEN)}). Preparing client...",
-        flush=True,
-    )
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = BossDiscordClient(intents=intents)
-
-    try:
-        print("[DISCORD] Connecting to Discord Gateway...", flush=True)
-        asyncio.run(client.start(DISCORD_BOT_TOKEN))
-    except discord.LoginFailure:
-        print(
-            "[DISCORD] ERROR: Discord rejected the bot token (LoginFailure). "
-            "Reset the token in Discord Developer Portal and update DISCORD_BOT_TOKEN in Render.",
-            flush=True,
-        )
-    except discord.PrivilegedIntentsRequired:
-        print(
-            "[DISCORD] ERROR: Message Content Intent is not enabled for this bot.",
-            flush=True,
-        )
-    except Exception as exc:
-        print(
-            f"[DISCORD] ERROR: {type(exc).__name__}: {exc}",
-            flush=True,
-        )
-
-
-def start_discord_bot():
-    print("[DISCORD] start_discord_bot() called.", flush=True)
-
-    if not DISCORD_BOT_TOKEN:
-        print("[DISCORD] ERROR: DISCORD_BOT_TOKEN is missing; bot will not start.", flush=True)
-        return
-
-    thread = threading.Thread(
-        target=run_discord_bot,
-        name="discord-bot",
-        daemon=True,
-    )
-    thread.start()
-    print("[DISCORD] Background thread started.", flush=True)
-
-
-start_discord_bot()
-
-
-
-# =========================================================
-# 啟動
-# =========================================================
-
-if __name__ == "__main__":
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            5000
-        )
-    )
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
