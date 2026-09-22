@@ -1,5 +1,8 @@
 import os
 import requests
+import threading
+import asyncio
+import discord
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -34,6 +37,8 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 REMINDER_WORKER_URL = os.environ.get("REMINDER_WORKER_URL", "").rstrip("/")
 REMINDER_API_KEY = os.environ.get("REMINDER_API_KEY", "")
+DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+DISCORD_KB_LINE_CHAT_ID = os.environ.get("DISCORD_KB_LINE_CHAT_ID", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -2344,6 +2349,131 @@ def handle_message(event):
                 )
             )
 
+
+
+# =========================================================
+# Discord KB 查詢
+# Discord 只提供 KB；資料來源固定對應 LINE 群組
+# =========================================================
+
+def create_discord_kb_embeds(chat_id):
+    bosses = get_current_bosses(chat_id)
+
+    if not bosses:
+        return []
+
+    date_groups = {}
+    for item in bosses:
+        respawn = item["respawn_time"].astimezone(TZ)
+        date_key = respawn.strftime("%Y-%m-%d")
+        date_groups.setdefault(date_key, []).append(item)
+
+    embeds = []
+    current_lines = []
+    current_count = 0
+
+    def flush_embed():
+        nonlocal current_lines, current_count
+        if not current_lines:
+            return
+
+        embed = discord.Embed(
+            title="📋 BOSS 重生時間表",
+            description="\n".join(current_lines),
+        )
+        embed.set_footer(text="時區：Asia/Taipei｜資料來源：LINE 群組")
+        embeds.append(embed)
+        current_lines = []
+        current_count = 0
+
+    for date_key in sorted(date_groups.keys()):
+        items = date_groups[date_key]
+        sample_date = items[0]["respawn_time"].astimezone(TZ)
+        header = f"**📅 {sample_date.strftime('%m/%d')} 週{weekday_tw(sample_date)}**"
+
+        # 每張 Embed 控制在約 20 隻，避免 Discord 內容上限。
+        if current_count and current_count + len(items) > 20:
+            flush_embed()
+
+        current_lines.append(header)
+        for item in items:
+            respawn = item["respawn_time"].astimezone(TZ)
+            current_lines.append(
+                f"`{respawn.strftime('%H:%M:%S')}`  **{item['boss_name']}**"
+            )
+            current_count += 1
+        current_lines.append("")
+
+    flush_embed()
+
+    total = len(embeds)
+    if total > 1:
+        for index, embed in enumerate(embeds, start=1):
+            embed.set_footer(
+                text=f"時區：Asia/Taipei｜資料來源：LINE 群組｜{index}/{total}"
+            )
+
+    return embeds
+
+
+class BossDiscordClient(discord.Client):
+    async def on_ready(self):
+        print(f"Discord Bot logged in as {self.user}")
+
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+
+        if message.content.strip().upper() != "KB":
+            return
+
+        if not DISCORD_KB_LINE_CHAT_ID:
+            await message.channel.send("❌ DISCORD_KB_LINE_CHAT_ID 尚未設定。")
+            return
+
+        try:
+            embeds = create_discord_kb_embeds(DISCORD_KB_LINE_CHAT_ID)
+
+            if not embeds:
+                await message.channel.send("📋 目前沒有 BOSS 紀錄。")
+                return
+
+            for embed in embeds:
+                await message.channel.send(embed=embed)
+
+        except Exception as exc:
+            print(f"Discord KB error: {exc}")
+            await message.channel.send("❌ KB 查詢失敗，請稍後再試。")
+
+
+def run_discord_bot():
+    if not DISCORD_BOT_TOKEN:
+        print("Discord Bot skipped: DISCORD_BOT_TOKEN not configured")
+        return
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+    client = BossDiscordClient(intents=intents)
+
+    try:
+        asyncio.run(client.start(DISCORD_BOT_TOKEN))
+    except Exception as exc:
+        print(f"Discord Bot stopped: {exc}")
+
+
+def start_discord_bot():
+    if not DISCORD_BOT_TOKEN:
+        return
+
+    thread = threading.Thread(
+        target=run_discord_bot,
+        name="discord-bot",
+        daemon=True,
+    )
+    thread.start()
+
+
+start_discord_bot()
 
 
 
