@@ -38,8 +38,6 @@ REMINDER_WORKER_URL = os.environ.get("REMINDER_WORKER_URL", "").rstrip("/")
 REMINDER_API_KEY = os.environ.get("REMINDER_API_KEY", "")
 DISCORD_PUBLIC_KEY = os.environ.get("DISCORD_PUBLIC_KEY", "")
 DISCORD_KB_LINE_CHAT_ID = os.environ.get("DISCORD_KB_LINE_CHAT_ID", "")
-DISCORD_APPLICATION_ID = os.environ.get("DISCORD_APPLICATION_ID", "")
-DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
@@ -1633,79 +1631,6 @@ def discord_interactions():
         }
     })
 
-
-
-# =========================================================
-# Discord /kb 一次性註冊
-# 註冊成功後可移除此區塊與 DISCORD_BOT_TOKEN / APPLICATION_ID。
-# 使用既有 ADMIN_PASSWORD 保護，不會顯示 Token。
-# =========================================================
-
-@app.route("/discord/register-kb", methods=["POST"])
-def register_discord_kb():
-    supplied_password = request.headers.get("X-Admin-Password", "")
-
-    if not ADMIN_PASSWORD or supplied_password != ADMIN_PASSWORD:
-        abort(401)
-
-    if not DISCORD_APPLICATION_ID:
-        return jsonify({
-            "ok": False,
-            "error": "DISCORD_APPLICATION_ID 尚未設定。"
-        }), 500
-
-    if not DISCORD_BOT_TOKEN:
-        return jsonify({
-            "ok": False,
-            "error": "DISCORD_BOT_TOKEN 尚未設定。"
-        }), 500
-
-    try:
-        response = requests.post(
-            f"https://discord.com/api/v10/applications/{DISCORD_APPLICATION_ID}/commands",
-            headers={
-                "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "name": "kb",
-                "description": "查看 BOSS 重生時間表",
-                "type": 1,
-            },
-            timeout=15,
-        )
-
-        if not response.ok:
-            print(
-                f"Discord /kb registration failed: "
-                f"{response.status_code} {response.text}",
-                flush=True
-            )
-            return jsonify({
-                "ok": False,
-                "status": response.status_code,
-                "error": "Discord /kb 註冊失敗，請查看 Render Log。"
-            }), 502
-
-        data = response.json()
-
-        return jsonify({
-            "ok": True,
-            "message": "Discord /kb 已註冊成功。",
-            "command": data.get("name"),
-            "command_id": data.get("id")
-        })
-
-    except Exception as exc:
-        print(
-            f"Discord /kb registration error: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True
-        )
-        return jsonify({
-            "ok": False,
-            "error": "Discord /kb 註冊時發生錯誤。"
-        }), 500
 
 
 # =========================================================
