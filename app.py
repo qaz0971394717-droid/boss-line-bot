@@ -1759,7 +1759,7 @@ def handle_kb_kill(event):
             kill_time, respawn_time, actual_minutes, half_mode = record_kill(
                 chat_id, boss_name, minutes
             )
-            reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
+            reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄｜下次出生 {respawn_time.astimezone(TZ).strftime('%m/%d %H:%M:%S')}")
 
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(
@@ -2323,7 +2323,7 @@ def handle_message(event):
         parts = text.split()
         if len(parts) != 4:
             reply_message = TextMessage(
-                text="❌ 格式：修改出生 伐木H 2026-10-16 14:30"
+                text="❌ 格式：修改出生 伐木H 2026-10-16 14:30:25"
             )
         else:
             input_name, date_text, clock_text = parts[1:]
@@ -2338,7 +2338,7 @@ def handle_message(event):
                     ).replace(tzinfo=TZ)
                 except ValueError:
                     reply_message = TextMessage(
-                        text="❌ 時間格式錯誤，例如：修改出生 伐木H 2026-10-16 14:30"
+                        text="❌ 時間格式錯誤，例如：修改出生 伐木H 2026-10-16 14:30:25"
                     )
                 else:
                     if set_boss_respawn(chat_id, boss_name, minutes, new_respawn):
@@ -2387,7 +2387,7 @@ def handle_message(event):
                     minutes
                 )
 
-                reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
+                reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄｜下次出生 {respawn_time.astimezone(TZ).strftime('%m/%d %H:%M:%S')}")
 
 
         # 手動補登
@@ -2441,7 +2441,7 @@ def handle_message(event):
                         kill_time=manual_time
                     )
 
-                    reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
+                    reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄｜下次出生 {respawn_time.astimezone(TZ).strftime('%m/%d %H:%M:%S')}")
 
         else:
 
