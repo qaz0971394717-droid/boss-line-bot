@@ -1252,16 +1252,26 @@ def create_kb_table(chat_id):
                         ]
                     },
                     {
-                        "type": "button",
-                        "style": "primary",
-                        "color": "#2563C5",
-                        "height": "sm",
+                        "type": "box",
+                        "layout": "vertical",
                         "flex": 3,
+                        "backgroundColor": "#2563C5",
+                        "cornerRadius": "6px",
+                        "paddingAll": "5px",
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                        "contents": [{
+                            "type": "text",
+                            "text": "⚔ K王",
+                            "size": "xxs",
+                            "weight": "bold",
+                            "color": "#FFFFFF",
+                            "align": "center"
+                        }],
                         "action": {
                             "type": "postback",
-                            "label": "K王",
-                            "data": "kbkill:" + item["boss_name"],
-                            "displayText": "⚔ K " + item["boss_name"]
+                            "label": "⚔ K王",
+                            "data": "kbkill:" + item["boss_name"]
                         }
                     }
                 ]
@@ -1725,10 +1735,9 @@ def handle_kb_kill(event):
             kill_time, respawn_time, actual_minutes, half_mode = record_kill(
                 chat_id, boss_name, minutes
             )
-            reply_message = create_kill_card(
-                boss_name, kill_time, respawn_time,
-                actual_minutes, manual=False, half_mode=half_mode
-            )
+            # 成功後不發訊息、不顯示 postback 文字，避免把 KB 王表洗上去。
+            # 舊 Flex 訊息無法原地更新；重新輸入 KB 才會顯示新時間。
+            return
 
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(
