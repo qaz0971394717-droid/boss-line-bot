@@ -21,7 +21,7 @@ from linebot.v3.messaging import (
     FlexMessage,
     FlexContainer,
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
 
 
 # =========================================================
@@ -1238,7 +1238,7 @@ def create_kb_table(chat_id):
                         "paddingEnd": "8px",
                         "paddingTop": "5px",
                         "paddingBottom": "5px",
-                        "flex": 7,
+                        "flex": 6,
 
                         "contents": [
 
@@ -1250,6 +1250,19 @@ def create_kb_table(chat_id):
                                 "color": "#2563C5"
                             }
                         ]
+                    },
+                    {
+                        "type": "button",
+                        "style": "primary",
+                        "color": "#2563C5",
+                        "height": "sm",
+                        "flex": 3,
+                        "action": {
+                            "type": "postback",
+                            "label": "K王",
+                            "data": "kbkill:" + item["boss_name"],
+                            "displayText": "⚔ K " + item["boss_name"]
+                        }
                     }
                 ]
             }
@@ -1687,6 +1700,40 @@ def callback():
         abort(400)
 
     return "OK"
+
+
+# =========================================================
+# LINE KB 一鍵 K 王
+# =========================================================
+@handler.add(PostbackEvent)
+def handle_kb_kill(event):
+    data = (event.postback.data or "").strip()
+    if not data.startswith("kbkill:"):
+        return
+
+    chat_id = get_chat_id(event)
+    input_name = data[len("kbkill:"):]
+    boss_name, minutes = find_boss(input_name)
+
+    if boss_name is None or boss_name != input_name:
+        reply_message = TextMessage(text="❌ 找不到這隻王，請重新輸入 KB。")
+    else:
+        current = get_current_bosses(chat_id)
+        if not any(item["boss_name"] == boss_name for item in current):
+            reply_message = TextMessage(text="❌ 這筆紀錄已不存在，請重新輸入 KB。")
+        else:
+            kill_time, respawn_time, actual_minutes, half_mode = record_kill(
+                chat_id, boss_name, minutes
+            )
+            reply_message = create_kill_card(
+                boss_name, kill_time, respawn_time,
+                actual_minutes, manual=False, half_mode=half_mode
+            )
+
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(reply_token=event.reply_token, messages=[reply_message])
+        )
 
 
 # =========================================================
