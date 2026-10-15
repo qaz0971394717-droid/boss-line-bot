@@ -1713,6 +1713,30 @@ def callback():
 
 
 # =========================================================
+# 直接修正指定 BOSS 的下一次出生時間
+# =========================================================
+def set_boss_respawn(chat_id, boss_name, minutes, new_respawn):
+    half_mode = get_half_mode(chat_id)
+    actual_minutes = minutes / 2 if half_mode else minutes
+    derived_kill = new_respawn - timedelta(minutes=actual_minutes)
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE boss_kills
+                SET kill_time = %s, respawn_time = %s
+                WHERE chat_id = %s AND boss_key = %s
+            """, (derived_kill, new_respawn, chat_id, boss_name.lower()))
+            updated = cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    if updated:
+        sync_boss_reminder(chat_id, boss_name, new_respawn)
+    return bool(updated)
+
+
+# =========================================================
 # LINE KB 一鍵 K 王
 # =========================================================
 @handler.add(PostbackEvent)
@@ -1735,9 +1759,7 @@ def handle_kb_kill(event):
             kill_time, respawn_time, actual_minutes, half_mode = record_kill(
                 chat_id, boss_name, minutes
             )
-            # 成功後不發訊息、不顯示 postback 文字，避免把 KB 王表洗上去。
-            # 舊 Flex 訊息無法原地更新；重新輸入 KB 才會顯示新時間。
-            return
+            reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
 
     with ApiClient(configuration) as api_client:
         MessagingApi(api_client).reply_message(
@@ -2293,6 +2315,42 @@ def handle_message(event):
     # K 王
     # =====================================================
 
+    # =====================================================
+    # 修改指定 BOSS 的下一次出生時間
+    # 格式：修改出生 王名 YYYY-MM-DD HH:MM[:SS]
+    # =====================================================
+    elif text.startswith("修改出生 "):
+        parts = text.split()
+        if len(parts) != 4:
+            reply_message = TextMessage(
+                text="❌ 格式：修改出生 伐木H 2026-10-16 14:30"
+            )
+        else:
+            input_name, date_text, clock_text = parts[1:]
+            boss_name, minutes = find_boss(input_name)
+            if boss_name is None:
+                reply_message = TextMessage(text=f"❌ 找不到 BOSS：{input_name}")
+            else:
+                try:
+                    fmt = "%Y-%m-%d %H:%M:%S" if len(clock_text.split(":")) == 3 else "%Y-%m-%d %H:%M"
+                    new_respawn = datetime.strptime(
+                        date_text + " " + clock_text, fmt
+                    ).replace(tzinfo=TZ)
+                except ValueError:
+                    reply_message = TextMessage(
+                        text="❌ 時間格式錯誤，例如：修改出生 伐木H 2026-10-16 14:30"
+                    )
+                else:
+                    if set_boss_respawn(chat_id, boss_name, minutes, new_respawn):
+                        reply_message = TextMessage(
+                            text=f"✅ {boss_name} 出生時間已改為 {new_respawn.strftime('%m/%d %H:%M:%S')}"
+                        )
+                    else:
+                        reply_message = TextMessage(
+                            text=f"❌ {boss_name} 尚無 K 王紀錄，請先記錄一次。"
+                        )
+
+
     elif text.upper().startswith("K "):
 
         parts = text.split()
@@ -2329,14 +2387,7 @@ def handle_message(event):
                     minutes
                 )
 
-                reply_message = create_kill_card(
-                    boss_name,
-                    kill_time,
-                    respawn_time,
-                    actual_minutes,
-                    manual=False,
-                    half_mode=half_mode
-                )
+                reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
 
 
         # 手動補登
@@ -2390,14 +2441,7 @@ def handle_message(event):
                         kill_time=manual_time
                     )
 
-                    reply_message = create_kill_card(
-                        boss_name,
-                        kill_time,
-                        respawn_time,
-                        actual_minutes,
-                        manual=True,
-                        half_mode=half_mode
-                    )
+                    reply_message = TextMessage(text=f"✅ {boss_name} 擊殺已記錄")
 
         else:
 
