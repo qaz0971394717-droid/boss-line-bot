@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reminderPayload,cancelPayload,stagingReminderRequest } from "../src/reminders.js";
+import { reminderPayload,cancelPayload,stagingReminderRequest,reminderWarning } from "../src/reminders.js";
 test("schedule payload compatible with original reminder worker",()=>{
  const p=reminderPayload("group","大象H","2026-10-16T06:30:00Z");
  assert.deepEqual(Object.keys(p),["chatId","bossKey","bossName","respawnAt"]);
@@ -54,4 +54,24 @@ test("only schedule and cancel reminder paths are permitted",async()=>{
  const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://staging.example",STAGING_REMINDER_API_KEY:"test"};
  const result=await stagingReminderRequest(env,"/admin",{},()=>{throw Error("must not call");});
  assert.equal(result.reason,"invalid-path");
+});
+
+test("do not warn when staging reminders are intentionally disabled",()=>{
+ assert.equal(reminderWarning({}, {sent:false,reason:"disabled"}),"");
+});
+test("show user a warning when enabled reminder schedule fails",()=>{
+ const warning=reminderWarning({ENABLE_STAGING_REMINDERS:"true"},{sent:false,status:503},"排程");
+ assert.match(warning,/提醒排程失敗/);
+ assert.match(warning,/503/);
+ assert.match(warning,/請勿依賴本次提醒/);
+});
+test("do not warn when reminder was delivered successfully",()=>{
+ assert.equal(reminderWarning({ENABLE_STAGING_REMINDERS:"true"},{sent:true,status:200}),"");
+});
+test("reminder paths preserve a staging base path",async()=>{
+ let url;
+ const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://staging.example/internal/",STAGING_REMINDER_API_KEY:"staging"};
+ const result=await stagingReminderRequest(env,"/cancel",{},async (u)=>{url=u;return {ok:true,status:200};});
+ assert.equal(result.sent,true);
+ assert.equal(url,"https://staging.example/internal/cancel");
 });
