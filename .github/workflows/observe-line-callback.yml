@@ -1,0 +1,43 @@
+name: Observe LINE callback outcomes
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: [.github/workflows/observe-line-callback.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tail client
+        run: npm install --prefix "$RUNNER_TEMP/tail-client" wrangler@4.151.1
+      - name: Observe sanitized outcomes for three minutes
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/filter.py" <<'PY'
+          import sys,json
+          for line in sys.stdin:
+              try: item=json.loads(line)
+              except Exception: continue
+              result={"worker":sys.argv[1],"timestamp":item.get("eventTimestamp"),"outcome":item.get("outcome")}
+              result["errors"]=[str(x.get("name","Error")) for x in item.get("exceptions",[])]
+              result["stages"]=[]
+              for entry in item.get("logs",[]):
+                  msg=entry.get("message",[])
+                  if isinstance(msg,list) and len(msg)>=3 and msg[0]=="Staging LINE processing failed:":
+                      result["stages"].append({"stage":msg[1],"type":msg[2]})
+              print(json.dumps(result),flush=True)
+          PY
+          for worker in hit2-boss-production hit2-boss-staging; do
+            (timeout 180 "$RUNNER_TEMP/tail-client/node_modules/.bin/wrangler" tail "$worker" --format json 2>/dev/null | python3 -u "$RUNNER_TEMP/filter.py" "$worker") &
+          done
+          wait
