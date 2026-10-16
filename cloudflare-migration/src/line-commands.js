@@ -3,7 +3,7 @@
 import { neon } from "@neondatabase/serverless";
 import { createKbFlex } from "./flex.js";
 import { processAdminCommand } from "./admin.js";
-import { stagingReminderRequest, reminderPayload, cancelPayload } from "./reminders.js";
+import { stagingReminderRequest, reminderPayload, cancelPayload, reminderWarning } from "./reminders.js";
 
 export const getChatId = source => source?.groupId || source?.roomId || source?.userId || "unknown";
 export const taipeiTime = date => { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Taipei",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(date).map(x=>[x.type,x.value])); return `${p.month}/${p.day} ${p.hour}:${p.minute}:${p.second}`; };
@@ -59,8 +59,12 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   }
   if(upper==="RESTART"){
     const deleted=await sql`DELETE FROM boss_kills WHERE chat_id=${chatId} RETURNING boss_name`;
-    for (const item of deleted) await stagingReminderRequest(env, "/cancel", cancelPayload(chatId, item.boss_name));
-    return textMessage(`🔄 RESTART 完成\n已清除目前聊天室全部死亡紀錄。\n共清除 ${deleted.length} 筆紀錄。\n\nHALF 設定不受影響。`);
+    const warnings=[];
+    for (const item of deleted){
+      const result=await stagingReminderRequest(env, "/cancel", cancelPayload(chatId, item.boss_name));
+      if(reminderWarning(env,result,"取消"))warnings.push(item.boss_name);
+    }
+    return textMessage(`🔄 RESTART 完成\n已清除目前聊天室全部死亡紀錄。\n共清除 ${deleted.length} 筆紀錄。\n\nHALF 設定不受影響。${warnings.length?`\n⚠️ 以下提醒取消失敗：${warnings.join("、")}`:""}`);
   }
   if(input==="王列表"||upper==="BOSS列表"){
     const rows=await sql`SELECT boss_name,minutes FROM boss_types ORDER BY minutes ASC,boss_name ASC`;
@@ -102,8 +106,8 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
     const half=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
     const boss=bosses[0],respawn=new Date(now.getTime()+Number(boss.minutes)*60000*(half[0]?.half_mode?0.5:1));
     await sql`UPDATE boss_kills SET kill_time=${now.toISOString()},respawn_time=${respawn.toISOString()} WHERE chat_id=${chatId} AND boss_key=${bossKey}`;
-    await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, boss.boss_name, respawn));
-    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}`);
+    const reminder=await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, boss.boss_name, respawn));
+    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}${reminderWarning(env,reminder,"排程")}`);
   }
   if(upper.startsWith("K ")){
     const parts=input.split(/\s+/);
@@ -117,20 +121,20 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
     await sql`INSERT INTO boss_kills(chat_id,boss_key,boss_name,kill_time,respawn_time)
       VALUES(${chatId},${boss.boss_name.toLowerCase()},${boss.boss_name},${kill.toISOString()},${respawn.toISOString()})
       ON CONFLICT(chat_id,boss_key) DO UPDATE SET boss_name=EXCLUDED.boss_name,kill_time=EXCLUDED.kill_time,respawn_time=EXCLUDED.respawn_time`;
-    await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, boss.boss_name, respawn));
-    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}`);
+    const reminder=await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, boss.boss_name, respawn));
+    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}${reminderWarning(env,reminder,"排程")}`);
   }
   if(input.startsWith("取消 ")){
     const names=[...new Set(input.slice(3).trim().split(/\s+/).filter(Boolean))];
     if(!names.length)return textMessage("❌ 格式：取消 伐木H 時光H 山峰H");
-    const removed=[],missing=[],noRecord=[];
+    const removed=[],missing=[],noRecord=[],warningNames=[];
     for(const name of names){
       const boss=await sql`SELECT boss_name FROM boss_types WHERE boss_key=${name.toLowerCase()}`;
       if(!boss.length){missing.push(name);continue;}
       const result=await sql`DELETE FROM boss_kills WHERE chat_id=${chatId} AND boss_key=${name.toLowerCase()} RETURNING boss_name`;
-      if(result.length){removed.push(result[0].boss_name);await stagingReminderRequest(env, "/cancel", cancelPayload(chatId, result[0].boss_name));}else noRecord.push(boss[0].boss_name);
+      if(result.length){removed.push(result[0].boss_name);const reminder=await stagingReminderRequest(env, "/cancel", cancelPayload(chatId, result[0].boss_name));if(reminderWarning(env,reminder,"取消"))warningNames.push(result[0].boss_name);}else noRecord.push(boss[0].boss_name);
     }
-    return textMessage([removed.length?`✅ 已取消 ${removed.length} 隻 BOSS：${removed.join(", ")}`:"",noRecord.length?`ℹ️ 無 K 王紀錄：${noRecord.join(", ")}`:"",missing.length?`❌ 找不到 BOSS：${missing.join(", ")}`:""].filter(Boolean).join("\n"));
+    return textMessage([removed.length?`✅ 已取消 ${removed.length} 隻 BOSS：${removed.join(", ")}`:"",noRecord.length?`ℹ️ 無 K 王紀錄：${noRecord.join(", ")}`:"",missing.length?`❌ 找不到 BOSS：${missing.join(", ")}`:"",warningNames.length?`⚠️ 以下提醒取消失敗：${warningNames.join("、")}`:""].filter(Boolean).join("\n"));
   }
   if(input.startsWith("修改出生 ")){
     const parts=input.split(/\s+/);
@@ -142,8 +146,8 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
     const half=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
     const kill=new Date(time.getTime()-Number(bosses[0].minutes)*60000*(half[0]?.half_mode?0.5:1));
     const updated=await sql`UPDATE boss_kills SET kill_time=${kill.toISOString()},respawn_time=${time.toISOString()} WHERE chat_id=${chatId} AND boss_key=${parts[1].toLowerCase()} RETURNING boss_name`;
-    if(updated.length)await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, updated[0].boss_name, time));
-    return textMessage(updated.length?`✅ ${updated[0].boss_name} 出生時間已改為 ${taipeiTime(time)}`:`❌ ${bosses[0].boss_name} 尚無 K 王紀錄，請先記錄一次。`);
+    const reminder=updated.length?await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, updated[0].boss_name, time)):null;
+    return textMessage(updated.length?`✅ ${updated[0].boss_name} 出生時間已改為 ${taipeiTime(time)}${reminderWarning(env,reminder,"排程")}`:`❌ ${bosses[0].boss_name} 尚無 K 王紀錄，請先記錄一次。`);
   }
   return textMessage("ℹ️ 測試版尚未支援此指令，正式服務仍由 Render 處理。");
 }
