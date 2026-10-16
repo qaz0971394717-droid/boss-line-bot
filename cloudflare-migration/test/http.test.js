@@ -22,11 +22,21 @@ test('preserves API payload and rejects credential-bearing redirects', async () 
   const result = await fetchWithTimeout('https://example.test', {
     method: 'POST', headers: { Authorization: 'Bearer test-only' }, body: '{}'
   }, async (_url, options) => {
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.equal(options.method, 'POST');
     assert.equal(options.headers.Authorization, 'Bearer test-only');
     assert.equal(options.body, '{}');
     return response;
   });
   assert.equal(result, response);
+});
+
+test('rejects redirects without making a second credential-bearing request', async () => {
+  let calls = 0;
+  await assert.rejects(fetchWithTimeout('https://example.test', {headers: {Authorization: 'Bearer test-only'}}, async (_url, options) => {
+    calls++;
+    assert.equal(options.redirect, 'manual');
+    return new Response(null, {status: 302, headers: {Location: 'https://other.test'}});
+  }), /HTTP redirect rejected/);
+  assert.equal(calls, 1);
 });
