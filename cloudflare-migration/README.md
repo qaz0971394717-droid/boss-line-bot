@@ -33,3 +33,10 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - Keep `ENABLE_STAGING_REMINDERS=false` until an entirely separate reminder Worker is ready. To enable explicitly, set `ENABLE_STAGING_REMINDERS=true` with `STAGING_REMINDER_WORKER_URL` and `STAGING_REMINDER_API_KEY`, NEVER the production reminder endpoint or credentials.
 - The delete-boss action removes that boss's kill records across all staging chats and attempts to cancel each affected chat's staging reminder. Do not treat a skipped or failed remote reminder operation as confirmation of cancellation.
 - No LIVE LINE webhook, Render service, production Neon connection or production reminder service is changed by these instructions.
+
+## Latest staging-only controls and alerts
+- Discord /kb requires `STAGING_MODE=true` **and** `ENABLE_STAGING_DISCORD=true`. Leave the production Discord Interactions URL pointed at Render.
+- Health `GET /` reports `line_enabled`, `admin_enabled`, and `reminders_enabled` flags (flags show configuration intent, not actual external connectivity).
+- On staging reminder schedule/cancel failure, LINE commands show that the boss database write succeeded but the reminder was **not confirmed**. Administrator boss deletion warns for each affected chat whose cancellation failed.
+- Reminder transport rejects a staging endpoint equal to `REMINDER_WORKER_URL`, or reuse of `REMINDER_API_KEY` when these production settings are supplied. Do not grant staging Worker access to production reminder secrets.
+- Failed reminder requests are not yet retried or queued durably. Never treat this staging code as verified production reminder delivery.
