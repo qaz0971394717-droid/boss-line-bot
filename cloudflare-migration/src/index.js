@@ -53,7 +53,7 @@ export function formatDiscordKb(rows) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "read-only", status: "ok" });
+    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
     if (url.pathname === "/callback" && request.method === "POST") {
       const body = await request.text();
       if (!await verifyLineSignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET)) return new Response("Invalid signature", { status: 401 });
@@ -87,6 +87,7 @@ export default {
       return json({ processed: outcomes.length, failed: outcomes.filter(x => x === "failed").length }, outcomes.includes("failed") ? 500 : 200);
     }
     if (url.pathname === "/discord/interactions" && request.method === "POST") {
+      if (env.STAGING_MODE !== "true" || env.ENABLE_STAGING_DISCORD !== "true") return json({ error: "Staging Discord disabled. Do not switch production interactions." }, 503);
       const body = await request.text();
       const ok = await verifyDiscordSignature(body, request.headers.get("x-signature-timestamp"), request.headers.get("x-signature-ed25519"), env.DISCORD_PUBLIC_KEY);
       if (!ok) return new Response("Invalid signature", { status: 401 });
