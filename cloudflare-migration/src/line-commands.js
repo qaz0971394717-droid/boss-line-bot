@@ -1,0 +1,80 @@
+// Staging-only LINE command engine. No production webhook is routed here yet.
+// All database writes require an isolated STAGING_DATABASE_URL.
+import { neon } from "@neondatabase/serverless";
+
+export const getChatId = source => source?.groupId || source?.roomId || source?.userId || "unknown";
+export const taipeiTime = date => new Intl.DateTimeFormat("en-GB", { timeZone:"Asia/Taipei",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23" }).format(date).replace(/^([0-9]{2})\/([0-9]{2}),? /,"$1/$2 ");
+export const textMessage = text => ({type:"text",text});
+
+export function parseKillTime(input, now = new Date()) {
+  if (!/^\d{4}(\d{2})?$/.test(input)) return null;
+  const hh=Number(input.slice(0,2)),mm=Number(input.slice(2,4)),ss=Number(input.slice(4,6)||0);
+  if(hh>23||mm>59||ss>59) return null;
+  const day=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+  const parsed=new Date(`${day}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}+08:00`);
+  return Number.isNaN(parsed.getTime())?null:parsed;
+}
+
+export function parseRespawnTime(day,clock) {
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!/^\d{2}:\d{2}(:\d{2})?$/.test(clock)) return null;
+  const date=new Date(`${day}T${clock.length===5?clock+":00":clock}+08:00`);
+  if(Number.isNaN(date.getTime()))return null;
+  const check=new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).format(date);
+  return check===`${day} ${clock.length===5?clock+":00":clock}`?date:null;
+}
+
+export async function handleLineCommand(command, chatId, env, now=new Date()) {
+  if(!env.STAGING_DATABASE_URL) return textMessage("❌ 測試資料庫尚未設定。");
+  const sql=neon(env.STAGING_DATABASE_URL);
+  const input=command.trim(), upper=input.toUpperCase();
+  if(upper==="KB"||input==="王"||upper==="BOSS"){
+    const rows=await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id=${chatId} ORDER BY respawn_time ASC`;
+    if(!rows.length)return textMessage("📋 目前沒有 BOSS 紀錄。");
+    return textMessage(rows.map(r=>`⚔️ ${r.boss_name}　${taipeiTime(new Date(r.respawn_time))}`).join("\n"));
+  }
+  if(upper==="HALF"||upper==="HALF ON"||upper==="HALF OFF"){
+    const rows=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
+    const enabled=upper==="HALF ON"?true:upper==="HALF OFF"?false:!Boolean(rows[0]?.half_mode);
+    await sql`INSERT INTO chat_settings(chat_id,half_mode) VALUES(${chatId},${enabled}) ON CONFLICT(chat_id) DO UPDATE SET half_mode=EXCLUDED.half_mode`;
+    return textMessage(enabled?"⚡ HALF 減半模式：已開啟":"⏱️ HALF 減半模式：已關閉");
+  }
+  if(upper.startsWith("K ")){
+    const parts=input.split(/\s+/);
+    if(parts.length!==2&&parts.length!==3)return textMessage("❌ K 王格式錯誤");
+    const rows=await sql`SELECT boss_name, minutes FROM boss_types WHERE boss_key=${parts[1].toLowerCase()}`;
+    if(!rows.length)return textMessage(`❌ 找不到 BOSS：${parts[1]}`);
+    const kill=parts.length===3?parseKillTime(parts[2],now):now;
+    if(!kill)return textMessage("❌ 時間格式錯誤，請輸入 4 碼或 6 碼時間。");
+    const half=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
+    const boss=rows[0],respawn=new Date(kill.getTime()+Number(boss.minutes)*60000*(half[0]?.half_mode?0.5:1));
+    await sql`INSERT INTO boss_kills(chat_id,boss_key,boss_name,kill_time,respawn_time)
+      VALUES(${chatId},${boss.boss_name.toLowerCase()},${boss.boss_name},${kill.toISOString()},${respawn.toISOString()})
+      ON CONFLICT(chat_id,boss_key) DO UPDATE SET boss_name=EXCLUDED.boss_name,kill_time=EXCLUDED.kill_time,respawn_time=EXCLUDED.respawn_time`;
+    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}`);
+  }
+  if(input.startsWith("取消 ")){
+    const names=[...new Set(input.slice(3).trim().split(/\s+/).filter(Boolean))];
+    if(!names.length)return textMessage("❌ 格式：取消 伐木H 時光H 山峰H");
+    const removed=[],missing=[],noRecord=[];
+    for(const name of names){
+      const boss=await sql`SELECT boss_name FROM boss_types WHERE boss_key=${name.toLowerCase()}`;
+      if(!boss.length){missing.push(name);continue;}
+      const result=await sql`DELETE FROM boss_kills WHERE chat_id=${chatId} AND boss_key=${name.toLowerCase()} RETURNING boss_name`;
+      if(result.length)removed.push(result[0].boss_name);else noRecord.push(boss[0].boss_name);
+    }
+    return textMessage([removed.length?`✅ 已取消 ${removed.length} 隻 BOSS：${removed.join(", ")}`:"",noRecord.length?`ℹ️ 無 K 王紀錄：${noRecord.join(", ")}`:"",missing.length?`❌ 找不到 BOSS：${missing.join(", ")}`:""].filter(Boolean).join("\n"));
+  }
+  if(input.startsWith("修改出生 ")){
+    const parts=input.split(/\s+/);
+    if(parts.length!==4)return textMessage("❌ 格式：修改出生 伐木H 2026-10-16 14:30:25");
+    const time=parseRespawnTime(parts[2],parts[3]);
+    if(!time)return textMessage("❌ 時間格式錯誤");
+    const bosses=await sql`SELECT boss_name,minutes FROM boss_types WHERE boss_key=${parts[1].toLowerCase()}`;
+    if(!bosses.length)return textMessage(`❌ 找不到 BOSS：${parts[1]}`);
+    const half=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
+    const kill=new Date(time.getTime()-Number(bosses[0].minutes)*60000*(half[0]?.half_mode?0.5:1));
+    const updated=await sql`UPDATE boss_kills SET kill_time=${kill.toISOString()},respawn_time=${time.toISOString()} WHERE chat_id=${chatId} AND boss_key=${parts[1].toLowerCase()} RETURNING boss_name`;
+    return textMessage(updated.length?`✅ ${updated[0].boss_name} 出生時間已改為 ${taipeiTime(time)}`:`❌ ${bosses[0].boss_name} 尚無 K 王紀錄，請先記錄一次。`);
+  }
+  return textMessage("ℹ️ 測試版尚未支援此指令，正式服務仍由 Render 處理。");
+}
