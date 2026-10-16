@@ -2,6 +2,7 @@
 // All database writes require an isolated STAGING_DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
 import { createKbFlex } from "./flex.js";
+import { processAdminCommand } from "./admin.js";
 import { stagingReminderRequest, reminderPayload, cancelPayload } from "./reminders.js";
 
 export const getChatId = source => source?.groupId || source?.roomId || source?.userId || "unknown";
@@ -29,6 +30,8 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   if(!env.STAGING_DATABASE_URL) return textMessage("❌ 測試資料庫尚未設定。");
   const sql=neon(env.STAGING_DATABASE_URL);
   const input=command.trim(), upper=input.toUpperCase();
+  const adminReply=await processAdminCommand(input,chatId,env,sql,now);
+  if(adminReply)return adminReply;
   if(input==="群組ID"||upper==="GROUPID")return textMessage("🆔 目前聊天室 ID\n\n"+chatId);
   if(input==="測試"||upper==="TEST"){
     const rows=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
