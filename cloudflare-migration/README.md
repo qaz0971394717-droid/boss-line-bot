@@ -25,3 +25,11 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - [ ] Verify LINE and Discord signatures, webhook responses, command parity
 - [ ] Confirm backup, rollback URLs, and no duplicate reminders
 - [ ] Switch webhooks only after explicit approval
+
+## Staging administrator challenge and reminder setup (NOT production)
+- Run `sql/001_staging_admin_challenges.sql` against **an isolated Neon staging database only**. The table stores the pending command and expiry, never the plaintext admin password.
+- Keep `ENABLE_STAGING_ADMIN` unset or `false` until the staging table and `ADMIN_PASSWORD` Worker secret have been configured. Admin commands are safely rejected otherwise.
+- Set `STAGING_MODE=true`, `ENABLE_STAGING_ADMIN=true` for staging-only administrator flows after creating the table.
+- Keep `ENABLE_STAGING_REMINDERS=false` until an entirely separate reminder Worker is ready. To enable explicitly, set `ENABLE_STAGING_REMINDERS=true` with `STAGING_REMINDER_WORKER_URL` and `STAGING_REMINDER_API_KEY`, NEVER the production reminder endpoint or credentials.
+- The delete-boss action removes that boss's kill records across all staging chats and attempts to cancel each affected chat's staging reminder. Do not treat a skipped or failed remote reminder operation as confirmation of cancellation.
+- No LIVE LINE webhook, Render service, production Neon connection or production reminder service is changed by these instructions.
