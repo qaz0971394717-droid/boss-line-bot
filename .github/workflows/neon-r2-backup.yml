@@ -39,8 +39,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq awscli
+          # Avoid apt repositories (exit code 100 on some GitHub runner images).
+          # Install AWS CLI v2 from the official standalone package.
+          curl --fail --silent --show-error --location \
+            "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+            -o "$RUNNER_TEMP/awscliv2.zip"
+          unzip -q "$RUNNER_TEMP/awscliv2.zip" -d "$RUNNER_TEMP"
+          sudo "$RUNNER_TEMP/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
           docker run --rm postgres:18 pg_dump --version
           aws --version
 
