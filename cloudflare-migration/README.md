@@ -26,6 +26,11 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - [ ] Confirm backup, rollback URLs, and no duplicate reminders
 - [ ] Switch webhooks only after explicit approval
 
+## Isolated staging database initialization
+- Create a separate Neon staging branch using the schema-only option where available, so production rows are not copied. Never point the staging Worker at the production connection string.
+- In the Neon SQL Editor for that staging branch, run `sql/000_staging_core.sql`, `sql/001_staging_admin_challenges.sql`, and `sql/002_staging_line_events.sql` in that order. The core migration creates the three application tables and seeds the 62 default bosses.
+- Configure the staging branch connection string only as the Cloudflare Worker secret `STAGING_DATABASE_URL`; do not commit or paste it into chat.
+
 ## Staging administrator challenge and reminder setup (NOT production)
 - Run `sql/001_staging_admin_challenges.sql` against **an isolated Neon staging database only**. The table stores the pending command and expiry, never the plaintext admin password.
 - Keep `ENABLE_STAGING_ADMIN` unset or `false` until the staging table and `ADMIN_PASSWORD` Worker secret have been configured. Admin commands are safely rejected otherwise.
@@ -44,7 +49,7 @@ This branch is intentionally separate from production `main`. **Do not change LI
 ## Handoff verification (2026-10-16)
 - LINE reply and reminder HTTP requests abort after five seconds and reject redirects. They are not automatically retried: a timed-out request may already have changed remote state.
 - A LINE reply failure is reported as a failed batch, while later events in that batch are still processed. Malformed events and events without a known chat are skipped; invalid signed top-level payloads return HTTP 400.
-- Apply `sql/002_staging_line_events.sql` only to the isolated staging database before enabling LINE. Durable `webhookEventId` claims prevent redelivery from running a command again; stored replies may be retried, and acknowledged deliveries are skipped.
+- The isolated database initialization section above lists all three staging SQL files in order. Durable `webhookEventId` claims prevent LINE redelivery from running a command again; stored replies may be retried, and acknowledged deliveries are skipped.
 - If a command crashes or its reply cannot be saved after a database mutation, its claim stays pending and redelivery fails closed. Reconcile the database/reminder state manually; do not automatically expire or delete pending claims. This favors preventing duplicate mutations over automatic recovery and does not provide atomic exactly-once delivery across PostgreSQL and external APIs.
 - A successful LINE reply whose delivery marker cannot be stored may still be retried with an already-used reply token. This requires operator reconciliation; automatic replay of the command is never attempted.
 - Staging has not been deployed or checked against a real isolated Neon database in this handoff. Cloudflare sign-in and isolated staging secrets are required to perform that verification.
