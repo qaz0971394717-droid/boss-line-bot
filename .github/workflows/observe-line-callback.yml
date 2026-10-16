@@ -25,9 +25,12 @@ jobs:
           set -euo pipefail
           cat > "$RUNNER_TEMP/filter.py" <<'PY'
           import sys,json
+          buffer=""
           for line in sys.stdin:
-              try: item=json.loads(line)
+              buffer+=line
+              try: item=json.loads(buffer)
               except Exception: continue
+              buffer=""
               result={"worker":sys.argv[1],"timestamp":item.get("eventTimestamp"),"outcome":item.get("outcome")}
               result["errors"]=[str(x.get("name","Error")) for x in item.get("exceptions",[])]
               result["stages"]=[]
