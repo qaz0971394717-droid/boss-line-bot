@@ -1,0 +1,115 @@
+name: Neon to R2 daily backup
+
+on:
+  schedule:
+    # 05:00 Asia/Taipei (21:00 UTC, previous calendar day)
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neon-r2-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      BUCKET: hit2-neon-backup
+    steps:
+      - name: Verify required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in DATABASE_URL R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ENDPOINT; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: $key"
+              exit 1
+            fi
+          done
+
+      - name: Install PostgreSQL client and backup tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18 awscli
+          pg_dump --version
+          aws --version
+
+      - name: Create compressed database backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/neon-backup"
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "BACKUP_STAMP=$stamp" >> "$GITHUB_ENV"
+          pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-acl \
+            --file="$RUNNER_TEMP/neon-backup/hit2-$stamp.dump"
+          test -s "$RUNNER_TEMP/neon-backup/hit2-$stamp.dump"
+          pg_restore --list "$RUNNER_TEMP/neon-backup/hit2-$stamp.dump" >/dev/null
+
+      - name: Upload backup to private R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          endpoint="${R2_ENDPOINT%/}"
+          file="$RUNNER_TEMP/neon-backup/hit2-$BACKUP_STAMP.dump"
+          key="daily/hit2-$BACKUP_STAMP.dump"
+          aws --endpoint-url "$endpoint" s3 cp "$file" "s3://$BUCKET/$key" --only-show-errors
+          aws --endpoint-url "$endpoint" s3api head-object --bucket "$BUCKET" --key "$key" >/dev/null
+          echo "Backup uploaded and verified: $key"
+
+      - name: Delete R2 backups older than 30 days
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime
+          import os
+          import subprocess
+
+          endpoint = os.environ["R2_ENDPOINT"].rstrip("/")
+          bucket = os.environ["BUCKET"]
+          cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
+          # Use CLI pagination and query filtering; only delete backup files under daily/.
+          import json
+          result = subprocess.run(
+              ["aws", "--endpoint-url", endpoint, "s3api", "list-objects-v2",
+               "--bucket", bucket, "--prefix", "daily/", "--output", "json"],
+              capture_output=True, text=True, check=True,
+          )
+          for obj in json.loads(result.stdout).get("Contents", []):
+              key = obj["Key"]
+              if not key.startswith("daily/hit2-") or not key.endswith(".dump"):
+                  continue
+              modified = datetime.datetime.fromisoformat(obj["LastModified"].replace("Z", "+00:00"))
+              if modified < cutoff:
+                  subprocess.run(
+                      ["aws", "--endpoint-url", endpoint, "s3api", "delete-object",
+                       "--bucket", bucket, "--key", key],
+                      check=True,
+                  )
+                  print("Deleted expired backup:", key)
+          PY
+
+      - name: Clean up local backup
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/neon-backup"
