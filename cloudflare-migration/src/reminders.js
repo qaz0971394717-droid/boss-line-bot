@@ -15,10 +15,10 @@ export async function stagingReminderRequest(env,path,payload,fetcher=fetch){
   if(env.REMINDER_WORKER_URL)production=new URL(env.REMINDER_WORKER_URL);
  }catch{return {sent:false,reason:"invalid-url"};}
  if(target.protocol!=="https:"||target.username||target.password||target.search||target.hash)return {sent:false,reason:"invalid-url"};
- if(production&&target.origin===production.origin&&target.pathname.replace(/\\/$/,"")===production.pathname.replace(/\\/$/,""))return {sent:false,reason:"production-endpoint"};
+ if(production&&target.origin===production.origin&&target.pathname.replace(/\/$/,"")===production.pathname.replace(/\/$/,""))return {sent:false,reason:"production-endpoint"};
  if(env.REMINDER_API_KEY&&env.REMINDER_API_KEY===env.STAGING_REMINDER_API_KEY)return {sent:false,reason:"production-key"};
  const endpoint=new URL(target.toString());
- endpoint.pathname=target.pathname.replace(/\\/$/,"")+path;
+ endpoint.pathname=target.pathname.replace(/\/$/,"")+path;
  try{
   const res=await fetcher(endpoint.toString(),{
    method:"POST",
@@ -29,4 +29,10 @@ export async function stagingReminderRequest(env,path,payload,fetcher=fetch){
  }catch{
   return {sent:false,reason:"network-error"};
  }
+}
+
+export function reminderWarning(env,result,verb="更新"){
+ if(env.ENABLE_STAGING_REMINDERS!=="true"||result?.sent)return "";
+ const reason=result?.reason||(`HTTP ${result?.status??"unknown"}`);
+ return `\n⚠️ BOSS 資料已儲存，但提醒${verb}失敗（${reason}）。請勿依賴本次提醒。`;
 }
