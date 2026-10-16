@@ -2281,34 +2281,34 @@ def handle_message(event):
     # =====================================================
 
     elif text.startswith("取消 "):
-        boss_name = text[len("取消 "):].strip()
-
-        if not boss_name:
+        # 支援「取消 伐木H 時光H 山峰H」，同時保留單隻取消。
+        # 重複輸入的王名只處理一次，避免重複取消提醒。
+        names = list(dict.fromkeys(text[len("取消 "):].split()))
+        if not names:
             reply_message = TextMessage(
-                text="❌ 格式錯誤\n請輸入：取消 王名\n例如：取消 大象H"
+                text="❌ 格式：取消 伐木H 時光H 山峰H"
             )
         else:
-            success, real_name, error = cancel_boss_record(chat_id, boss_name)
+            removed = []
+            missing = []
+            no_record = []
+            for name in names:
+                success, real_name, error = cancel_boss_record(chat_id, name)
+                if success:
+                    removed.append(real_name)
+                elif error == "boss_not_found":
+                    missing.append(name)
+                else:
+                    no_record.append(real_name or name)
 
-            if success:
-                reply_message = TextMessage(
-                    text=(
-                        "↩️ 已取消 BOSS 紀錄\n"
-                        f"{real_name}\n\n"
-                        "※ 只取消目前群組的紀錄，固定王表不受影響。"
-                    )
-                )
-            elif error == "boss_not_found":
-                reply_message = TextMessage(
-                    text=(
-                        f"❌ 找不到 BOSS：{boss_name}\n"
-                        "輸入「王列表」查看完整名單。"
-                    )
-                )
-            else:
-                reply_message = TextMessage(
-                    text=f"ℹ️ {real_name} 目前沒有 K 王紀錄，不需要取消。"
-                )
+            lines = []
+            if removed:
+                lines.append(f"✅ 已取消 {len(removed)} 隻 BOSS：{', '.join(removed)}")
+            if no_record:
+                lines.append(f"ℹ️ 無 K 王紀錄：{', '.join(no_record)}")
+            if missing:
+                lines.append(f"❌ 找不到 BOSS：{', '.join(missing)}")
+            reply_message = TextMessage(text="\n".join(lines))
 
 
     # =====================================================
