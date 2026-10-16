@@ -68,7 +68,7 @@ export default {
       for (const event of events) {
         if (event.mode === "standby" || !event.replyToken) continue;
         const chatId = getChatId(event.source);
-        const command = event.type === "message" && event.message?.type === "text" ? event.message.text : null;
+        const command = event.type === "message" && event.message?.type === "text" ? event.message.text : event.type === "postback" && event.postback?.data?.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
         if (!command) continue;
         try {
           const reply = await handleLineCommand(command, chatId, env);
