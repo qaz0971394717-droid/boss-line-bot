@@ -1,3 +1,4 @@
+import { migrationGate } from "./migration.js";
 import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
 import { fetchWithTimeout } from "./http.js";
@@ -56,7 +57,9 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
  return {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
+    const maintenance = await migrationGate(request, env);
+    if (maintenance) return maintenance;
+    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", database_backend: env.DATABASE_BACKEND === "d1" ? "d1" : "neon", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
     if (url.pathname === "/callback" && request.method === "POST") {
       const body = await request.text();
       if (!await verifyLineSignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET)) return new Response("Invalid signature", { status: 401 });
