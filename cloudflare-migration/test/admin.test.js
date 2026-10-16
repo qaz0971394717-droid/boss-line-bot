@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAdminCommand,parseAdminCommand,processAdminCommand } from "../src/admin.js";
+import { isAdminCommand,parseAdminCommand,processAdminCommand,applyAdminAction } from "../src/admin.js";
 
 test("recognizes administrator commands",()=>{
  assert.equal(isAdminCommand("新增王 黑龍1 720"),true);
@@ -30,4 +30,25 @@ test("incorrect password cancels action without changing boss catalog",async()=>
  const result=await processAdminCommand("bad","g",{STAGING_MODE:"true",ENABLE_STAGING_ADMIN:"true",ADMIN_PASSWORD:"correct"},sql,new Date("2026-10-16T08:01:00Z"));
  assert.match(result.text,/密碼錯誤/);
  assert.equal(calls,1);
+});
+
+test("deleting a boss cancels reminders for each affected group",async()=>{
+ const statements=[];
+ const sql=async(strings,...values)=>{
+  const query=strings.join("?");statements.push({query,values});
+  if(query.includes("DELETE FROM boss_types"))return [{boss_name:"黑龍1"}];
+  if(query.includes("DELETE FROM boss_kills"))return [{chat_id:"group-A",boss_name:"黑龍1"},{chat_id:"group-B",boss_name:"黑龍1"}];
+  return [];
+ };
+ const result=await applyAdminAction({kind:"刪除王",names:["黑龍1"]},sql,{});
+ assert.match(result.text,/成功/);
+ assert.equal(statements.length,2);
+ assert.equal(statements[1].values[0],"黑龍1".toLowerCase());
+});
+test("admin deletion of an unknown boss leaves group records untouched",async()=>{
+ let operations=0;
+ const sql=async()=>{operations++;return [];};
+ const reply=await applyAdminAction({kind:"刪除王",names:["不存在"]},sql,{});
+ assert.match(reply.text,/未處理/);
+ assert.equal(operations,1);
 });
