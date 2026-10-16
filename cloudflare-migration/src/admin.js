@@ -1,3 +1,4 @@
+import { stagingReminderRequest, cancelPayload } from "./reminders.js";
 // Staging-only administrator commands. No password is persisted in PostgreSQL.
 export const isAdminCommand=text=>/^(新增王|批次新增王|修改王|刪除王)\s+/.test(text);
 export function parseAdminCommand(text){
@@ -30,7 +31,7 @@ export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
   if(!env.ADMIN_PASSWORD||!await safeEqual(input,env.ADMIN_PASSWORD))return response("❌ 管理密碼錯誤。此次操作已取消。");
   const parsed=parseAdminCommand(pending[0].command);
   if(!parsed)return response("❌ 管理指令格式錯誤，請重新輸入。");
-  return applyAdminAction(parsed,sql);
+  return applyAdminAction(parsed,sql,env);
  }
  if(!isAdminCommand(input))return null;
  if(!parseAdminCommand(input))return response("❌ 管理指令格式錯誤：請檢查王名及分鐘數。");
@@ -40,7 +41,7 @@ export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
  ON CONFLICT(chat_id) DO UPDATE SET command=EXCLUDED.command,expires_at=EXCLUDED.expires_at`;
  return response("🔒 此操作需要管理權限。請在 60 秒內輸入管理密碼。");
 }
-export async function applyAdminAction(action,sql){
+export async function applyAdminAction(action,sql,env={}){
  const {kind,names,minutes}=action;
  const completed=[],rejected=[];
  for(const name of names){
@@ -52,9 +53,11 @@ export async function applyAdminAction(action,sql){
    const changed=await sql`UPDATE boss_types SET minutes=${minutes} WHERE boss_key=${key} RETURNING boss_name`;
    (changed.length?completed:rejected).push(name);
   }else if(kind==="刪除王"){
+   // Remove all associated kill records, then cancel reminders for EACH affected chat.
    const deleted=await sql`DELETE FROM boss_types WHERE boss_key=${key} RETURNING boss_name`;
    if(deleted.length){
-    await sql`DELETE FROM boss_kills WHERE boss_key=${key}`;
+    const affected=await sql`DELETE FROM boss_kills WHERE boss_key=${key} RETURNING chat_id,boss_name`;
+    for(const item of affected)await stagingReminderRequest(env,"/cancel",cancelPayload(item.chat_id,item.boss_name));
     completed.push(name);
    }else rejected.push(name);
   }
