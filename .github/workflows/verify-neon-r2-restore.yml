@@ -79,6 +79,8 @@ jobs:
               out.write("BACKUP_KEY=" + key + "\n")
           print("Selected backup:", key)
           PY
+          BACKUP_KEY="$(sed -n 's/^BACKUP_KEY=//p' "$GITHUB_ENV" | tail -n 1)"
+          test -n "$BACKUP_KEY"
           aws --endpoint-url "${R2_ENDPOINT%/}" s3 cp \
             "s3://$BUCKET/$BACKUP_KEY" "$RUNNER_TEMP/restore/latest.dump" --only-show-errors
           test -s "$RUNNER_TEMP/restore/latest.dump"
