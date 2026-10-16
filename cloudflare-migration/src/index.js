@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { handleLineCommand, getChatId } from "./line-commands.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const bytes = (s) => new TextEncoder().encode(s);
@@ -7,7 +8,9 @@ export async function verifyLineSignature(body, signature, secret) {
   if (!signature || !secret) return false;
   const key = await crypto.subtle.importKey("raw", bytes(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signed = new Uint8Array(await crypto.subtle.sign("HMAC", key, bytes(body)));
-  const actual = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+  let actual;
+  try { actual = Uint8Array.from(atob(signature), c => c.charCodeAt(0)); }
+  catch { return false; }
   if (actual.length !== signed.length) return false;
   let diff = 0;
   for (let i = 0; i < signed.length; i++) diff |= actual[i] ^ signed[i];
@@ -37,7 +40,7 @@ export function formatDiscordKb(rows) {
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
   for (const [date, items] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
     const first = new Date(items[0].respawn_time);
-    const wd = weekdays[Number(new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "Asia/Taipei" }).format(first).replace(/Sun|Mon|Tue|Wed|Thu|Fri|Sat/g, m => ({Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6})[m]))];
+    const wd = weekdays[({Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6})[new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "Asia/Taipei" }).format(first)]];
     lines.push(`📅 **${date.slice(5).replace("-", "/")}（週${wd}）**`, "```", "時間       BOSS", "────────  ──────────");
     for (const row of items) lines.push(`${fmtTime.format(new Date(row.respawn_time))}   ${row.boss_name}`);
     lines.push("```", "");
@@ -54,8 +57,34 @@ export default {
     if (url.pathname === "/callback" && request.method === "POST") {
       const body = await request.text();
       if (!await verifyLineSignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET)) return new Response("Invalid signature", { status: 401 });
-      // Safety: never acknowledge a production LINE event as processed during staging.
-      return json({ error: "LINE command parity not yet implemented; do not switch production webhook" }, 503);
+      // Explicitly opt-in to staging processing; never route production LINE here.
+      if (env.STAGING_MODE !== "true" || !env.STAGING_DATABASE_URL || !env.LINE_CHANNEL_ACCESS_TOKEN || env.ENABLE_STAGING_LINE !== "true") {
+        return json({ error: "Staging LINE disabled. Do not switch production webhook." }, 503);
+      }
+      let payload;
+      try { payload = JSON.parse(body); } catch { return json({ error: "Invalid JSON" }, 400); }
+      const events = Array.isArray(payload.events) ? payload.events : [];
+      const outcomes = [];
+      for (const event of events) {
+        if (event.mode === "standby" || !event.replyToken) continue;
+        const chatId = getChatId(event.source);
+        const command = event.type === "message" && event.message?.type === "text" ? event.message.text : null;
+        if (!command) continue;
+        try {
+          const reply = await handleLineCommand(command, chatId, env);
+          const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ replyToken: event.replyToken, messages: [reply] })
+          });
+          if (!res.ok) throw new Error(`LINE reply HTTP ${res.status}`);
+          outcomes.push("ok");
+        } catch (e) {
+          console.error("Staging LINE processing failed:", e?.name, e?.message);
+          outcomes.push("failed");
+        }
+      }
+      return json({ processed: outcomes.length, failed: outcomes.filter(x => x === "failed").length }, outcomes.includes("failed") ? 500 : 200);
     }
     if (url.pathname === "/discord/interactions" && request.method === "POST") {
       const body = await request.text();
@@ -65,9 +94,9 @@ export default {
       try { payload = JSON.parse(body); } catch { return json({ error: "Invalid JSON" }, 400); }
       if (payload.type === 1) return json({ type: 1 });
       if (payload.type === 2 && payload.data?.name?.toLowerCase() === "kb") {
-        if (!env.DISCORD_KB_LINE_CHAT_ID || !env.DATABASE_URL) return json({ type: 4, data: { content: "❌ Discord 資料庫設定尚未完成。", flags: 64 } });
+        if (!env.DISCORD_KB_LINE_CHAT_ID || !env.STAGING_DATABASE_URL) return json({ type: 4, data: { content: "❌ Discord 資料庫設定尚未完成。", flags: 64 } });
         try {
-          const sql = neon(env.DATABASE_URL);
+          const sql = neon(env.STAGING_DATABASE_URL);
           const rows = await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id = ${env.DISCORD_KB_LINE_CHAT_ID} ORDER BY respawn_time ASC`;
           return json({ type: 4, data: { content: formatDiscordKb(rows), allowed_mentions: { parse: [] } } });
         } catch (e) {
