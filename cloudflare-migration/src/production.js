@@ -12,11 +12,13 @@ export function createProductionWorker({ worker = createWorker() } = {}) {
           line_enabled: enabled, admin_enabled: enabled && env.ENABLE_ADMIN === 'true', reminders_enabled: false });
       }
       if (url.pathname !== '/callback' || request.method !== 'POST') return new Response('Not Found', { status: 404 });
-      if (!enabled || !env.DATABASE_URL || !env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
+      if (!enabled || !(env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB?.prepare : env.DATABASE_URL) || !env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
         return Response.json({ error: 'Production LINE configuration incomplete' }, { status: 503 });
       }
       return worker.fetch(request, {
         STAGING_MODE: 'true',
+        DATABASE_BACKEND: env.DATABASE_BACKEND,
+        BOSS_DB: env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB : undefined,
         ENABLE_STAGING_LINE: 'true',
         STAGING_DATABASE_URL: env.DATABASE_URL,
         LINE_CHANNEL_SECRET: env.LINE_CHANNEL_SECRET,

@@ -1,6 +1,6 @@
 // Staging-only LINE command engine. No production webhook is routed here yet.
 // All database writes require an isolated STAGING_DATABASE_URL.
-import { neon } from "@neondatabase/serverless";
+import { createSql, hasDatabase } from "./database.js";
 import { createKbFlex } from "./flex.js";
 import { processAdminCommand } from "./admin.js";
 import { stagingReminderRequest, reminderPayload, cancelPayload, reminderWarning } from "./reminders.js";
@@ -27,8 +27,8 @@ export function parseRespawnTime(day,clock) {
 }
 
 export async function handleLineCommand(command, chatId, env, now=new Date()) {
-  if(!env.STAGING_DATABASE_URL) return textMessage("❌ 測試資料庫尚未設定。");
-  const sql=neon(env.STAGING_DATABASE_URL);
+  if(!hasDatabase(env)) return textMessage("❌ 測試資料庫尚未設定。");
+  const sql=createSql(env);
   const input=command.trim(), upper=input.toUpperCase();
   const adminReply=await processAdminCommand(input,chatId,env,sql,now);
   if(adminReply)return adminReply;
@@ -55,7 +55,7 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   if(input==="群組ID"||upper==="GROUPID")return textMessage("🆔 目前聊天室 ID\n\n"+chatId);
   if(input==="測試"||upper==="TEST"){
     const rows=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
-    return textMessage("✅ BOSS Bot 正常運作！\n目前："+(rows[0]?.half_mode?"⚡ HALF 減半模式":"⏱️ 正常模式")+"\n資料庫：PostgreSQL");
+    return textMessage("✅ BOSS Bot 正常運作！\n目前："+(rows[0]?.half_mode?"⚡ HALF 減半模式":"⏱️ 正常模式")+"\n資料庫："+(env.DATABASE_BACKEND==="d1"?"Cloudflare D1":"PostgreSQL")+"");
   }
   if(upper==="RESTART"){
     const deleted=await sql`DELETE FROM boss_kills WHERE chat_id=${chatId} RETURNING boss_name`;
