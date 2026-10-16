@@ -23,6 +23,7 @@ async function safeEqual(a,b){
  return diff===0;
 }
 export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
+ if(env.STAGING_MODE!=="true"||env.ENABLE_STAGING_ADMIN!=="true")return isAdminCommand(input)?response("❌ 測試版管理功能尚未啟用。"):null;
  // A single DELETE ... RETURNING atomically consumes a pending challenge.
  // Each chat has at most one active challenge.
  const pending=await sql`DELETE FROM staging_admin_challenges WHERE chat_id=${chatId} RETURNING command,expires_at`;
