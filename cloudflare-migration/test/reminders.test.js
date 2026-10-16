@@ -34,3 +34,24 @@ test("staging reminder reports server failure",async()=>{
  const result=await stagingReminderRequest(env,"/cancel",cancelPayload("g1","大象H"),async()=>({ok:false,status:503}));
  assert.deepEqual(result,{sent:false,status:503});
 });
+
+test("staging reminders reject exact live endpoint",async()=>{
+ const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://reminder.example/",REMINDER_WORKER_URL:"https://reminder.example",STAGING_REMINDER_API_KEY:"staging"};
+ const result=await stagingReminderRequest(env,"/schedule",{},()=>{throw Error("should never reach live endpoint");});
+ assert.equal(result.reason,"production-endpoint");
+});
+test("staging reminders reject reused production API key",async()=>{
+ const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://staging.example",STAGING_REMINDER_API_KEY:"same",REMINDER_API_KEY:"same"};
+ const result=await stagingReminderRequest(env,"/schedule",{},()=>{throw Error("should never use production key");});
+ assert.equal(result.reason,"production-key");
+});
+test("network errors do not fail the LINE callback",async()=>{
+ const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://staging.example",STAGING_REMINDER_API_KEY:"test"};
+ const result=await stagingReminderRequest(env,"/schedule",{},async()=>{throw Error("connection failed");});
+ assert.deepEqual(result,{sent:false,reason:"network-error"});
+});
+test("only schedule and cancel reminder paths are permitted",async()=>{
+ const env={STAGING_MODE:"true",ENABLE_STAGING_REMINDERS:"true",STAGING_REMINDER_WORKER_URL:"https://staging.example",STAGING_REMINDER_API_KEY:"test"};
+ const result=await stagingReminderRequest(env,"/admin",{},()=>{throw Error("must not call");});
+ assert.equal(result.reason,"invalid-path");
+});
