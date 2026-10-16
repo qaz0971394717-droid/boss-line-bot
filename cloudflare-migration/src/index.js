@@ -77,25 +77,32 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         if (chatId === "unknown") continue;
         const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
         if (!command) continue;
+        let stage = "event-validation";
         try {
           if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");
+          stage = "database-client";
           eventStore ||= eventStoreFactory(env);
+          stage = "event-claim";
           const claim = await eventStore.claim(event.webhookEventId);
           if (claim.state === "done") { outcomes.push("ok"); continue; }
           if (claim.state === "pending") throw new Error("Event requires reconciliation");
+          stage = "command";
           const reply = claim.state === "ready" ? claim.reply : await commandHandler(command, chatId, env);
+          stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
+          stage = "line-reply";
           const res = await fetchWithTimeout("https://api.line.me/v2/bot/message/reply", {
             method: "POST",
             headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ replyToken: event.replyToken, messages: [reply] })
           }, fetcher);
           if (!res.ok) throw new Error(`LINE reply HTTP ${res.status}`);
+          stage = "delivery-storage";
           await eventStore.delivered(event.webhookEventId);
           outcomes.push("ok");
         } catch (e) {
           // Provider error text can contain URLs or credentials. Log only type.
-          console.error("Staging LINE processing failed:", e?.name);
+          console.error("Staging LINE processing failed:", stage, e?.name);
           outcomes.push("failed");
         }
       }
