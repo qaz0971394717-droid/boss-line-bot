@@ -8,12 +8,25 @@ export function cancelPayload(chatId,bossName){
 export async function stagingReminderRequest(env,path,payload,fetcher=fetch){
  if(env.STAGING_MODE!=="true"||env.ENABLE_STAGING_REMINDERS!=="true")return {sent:false,reason:"disabled"};
  if(!env.STAGING_REMINDER_WORKER_URL||!env.STAGING_REMINDER_API_KEY)return {sent:false,reason:"not-configured"};
- const target=new URL(env.STAGING_REMINDER_WORKER_URL);
- if(target.protocol!=="https:")return {sent:false,reason:"invalid-url"};
- const res=await fetcher(new URL(path,target).toString(),{
-  method:"POST",
-  headers:{"Authorization":"Bearer "+env.STAGING_REMINDER_API_KEY,"Content-Type":"application/json"},
-  body:JSON.stringify(payload)
- });
- return {sent:res.ok,status:res.status};
+ if(path!=="/schedule"&&path!=="/cancel")return {sent:false,reason:"invalid-path"};
+ let target,production;
+ try {
+  target=new URL(env.STAGING_REMINDER_WORKER_URL);
+  if(env.REMINDER_WORKER_URL)production=new URL(env.REMINDER_WORKER_URL);
+ }catch{return {sent:false,reason:"invalid-url"};}
+ if(target.protocol!=="https:"||target.username||target.password||target.search||target.hash)return {sent:false,reason:"invalid-url"};
+ if(production&&target.origin===production.origin&&target.pathname.replace(/\\/$/,"")===production.pathname.replace(/\\/$/,""))return {sent:false,reason:"production-endpoint"};
+ if(env.REMINDER_API_KEY&&env.REMINDER_API_KEY===env.STAGING_REMINDER_API_KEY)return {sent:false,reason:"production-key"};
+ const endpoint=new URL(target.toString());
+ endpoint.pathname=target.pathname.replace(/\\/$/,"")+path;
+ try{
+  const res=await fetcher(endpoint.toString(),{
+   method:"POST",
+   headers:{"Authorization":"Bearer "+env.STAGING_REMINDER_API_KEY,"Content-Type":"application/json"},
+   body:JSON.stringify(payload)
+  });
+  return {sent:res.ok,status:res.status};
+ }catch{
+  return {sent:false,reason:"network-error"};
+ }
 }
