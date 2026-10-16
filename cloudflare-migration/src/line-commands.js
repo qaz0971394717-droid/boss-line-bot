@@ -1,6 +1,7 @@
 // Staging-only LINE command engine. No production webhook is routed here yet.
 // All database writes require an isolated STAGING_DATABASE_URL.
 import { neon } from "@neondatabase/serverless";
+import { createKbFlex } from "./flex.js";
 
 export const getChatId = source => source?.groupId || source?.roomId || source?.userId || "unknown";
 export const taipeiTime = date => { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Taipei",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(date).map(x=>[x.type,x.value])); return `${p.month}/${p.day} ${p.hour}:${p.minute}:${p.second}`; };
@@ -29,6 +30,7 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   const input=command.trim(), upper=input.toUpperCase();
   if(upper==="KB"||input==="王"||upper==="BOSS"){
     const rows=await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id=${chatId} ORDER BY respawn_time ASC`;
+    if(upper==="KB")return createKbFlex(rows);
     if(!rows.length)return textMessage("📋 目前沒有 BOSS 紀錄。");
     return textMessage(rows.map(r=>`⚔️ ${r.boss_name}　${taipeiTime(new Date(r.respawn_time))}`).join("\n"));
   }
