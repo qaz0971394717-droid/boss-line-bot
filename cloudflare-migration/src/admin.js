@@ -1,4 +1,4 @@
-import { stagingReminderRequest, cancelPayload } from "./reminders.js";
+import { stagingReminderRequest, cancelPayload, reminderWarning } from "./reminders.js";
 // Staging-only administrator commands. No password is persisted in PostgreSQL.
 export const isAdminCommand=text=>/^(新增王|批次新增王|修改王|刪除王)\s+/.test(text);
 export function parseAdminCommand(text){
@@ -44,7 +44,7 @@ export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
 }
 export async function applyAdminAction(action,sql,env={}){
  const {kind,names,minutes}=action;
- const completed=[],rejected=[];
+ const completed=[],rejected=[],reminderFailures=[];
  for(const name of names){
   const key=name.toLowerCase();
   if(kind==="新增王"||kind==="批次新增王"){
@@ -58,10 +58,10 @@ export async function applyAdminAction(action,sql,env={}){
    const deleted=await sql`DELETE FROM boss_types WHERE boss_key=${key} RETURNING boss_name`;
    if(deleted.length){
     const affected=await sql`DELETE FROM boss_kills WHERE boss_key=${key} RETURNING chat_id,boss_name`;
-    for(const item of affected)await stagingReminderRequest(env,"/cancel",cancelPayload(item.chat_id,item.boss_name));
+    for(const item of affected){const result=await stagingReminderRequest(env,"/cancel",cancelPayload(item.chat_id,item.boss_name));if(reminderWarning(env,result,"取消"))reminderFailures.push(`${item.boss_name}（${item.chat_id}）`);}
     completed.push(name);
    }else rejected.push(name);
   }
  }
- return response([completed.length?`✅ ${kind}成功：${completed.join("、")}`:"",rejected.length?`⚠️ 未處理（已存在或不存在）：${rejected.join("、")}`:""].filter(Boolean).join("\n"));
+ return response([completed.length?`✅ ${kind}成功：${completed.join("、")}`:"",rejected.length?`⚠️ 未處理（已存在或不存在）：${rejected.join("、")}`:"",reminderFailures.length?`⚠️ 以下群組提醒取消失敗：${reminderFailures.join("、")}`:""].filter(Boolean).join("\n"));
 }
