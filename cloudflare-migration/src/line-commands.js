@@ -32,6 +32,26 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   const input=command.trim(), upper=input.toUpperCase();
   const adminReply=await processAdminCommand(input,chatId,env,sql,now);
   if(adminReply)return adminReply;
+  if(input==="指令"||upper==="HELP")return textMessage([
+    "📖 BOSS Bot 使用說明",
+    "⚔️【報王】K 王名｜K 王名 1022｜K 王名 102233",
+    "📋【查詢】KB｜王｜王列表",
+    "↩️【取消】取消 王名（可一次輸入多個）",
+    "⚡【HALF】HALF｜HALF ON｜HALF OFF",
+    "🔄【其他】RESTART｜測試｜群組ID",
+    "🕐【修改時間】修改出生 王名 YYYY-MM-DD HH:MM:SS",
+    "🔐 王表管理請輸入：管理指令"
+  ].join("\\n"));
+  if(input==="管理指令")return textMessage([
+    "🔐 BOSS Bot 管理指令",
+    "以下操作會修改全系統共用王表，影響所有群組。",
+    "新增王 王名 分鐘",
+    "批次新增王 王A、王B 720",
+    "修改王 王名 分鐘",
+    "刪除王 王名",
+    "以上指令需在 60 秒內輸入管理密碼。",
+    "密碼錯誤或逾時將取消操作。"
+  ].join("\\n"));
   if(input==="群組ID"||upper==="GROUPID")return textMessage("🆔 目前聊天室 ID\n\n"+chatId);
   if(input==="測試"||upper==="TEST"){
     const rows=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
