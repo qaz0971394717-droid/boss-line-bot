@@ -6,7 +6,10 @@ export async function fetchWithTimeout(url, options = {}, fetcher = fetch, timeo
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetcher(url, { ...options, signal: controller.signal, redirect: "error" });
+    // Workers runtime supports manual redirects consistently; never forward credentials.
+    const response = await fetcher(url, { ...options, signal: controller.signal, redirect: "manual" });
+    if (response.status >= 300 && response.status < 400) throw new TypeError("HTTP redirect rejected");
+    return response;
   } finally {
     clearTimeout(timer);
   }
