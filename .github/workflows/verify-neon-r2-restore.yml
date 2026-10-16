@@ -1,0 +1,123 @@
+name: Verify Neon R2 backup restore
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: restoretest
+          POSTGRES_PASSWORD: restoretest_local_only
+          POSTGRES_DB: restoretest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U restoretest -d restoretest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      AWS_DEFAULT_REGION: auto
+      BUCKET: hit2-neon-backup
+    steps:
+      - name: Check R2 secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_ENDPOINT; do
+            if [ -z "${!key:-}" ]; then
+              echo "::error::Missing secret: $key"
+              exit 1
+            fi
+          done
+
+      - name: Set up AWS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "$RUNNER_TEMP/aws.zip"
+            unzip -q "$RUNNER_TEMP/aws.zip" -d "$RUNNER_TEMP"
+            sudo "$RUNNER_TEMP/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+          fi
+          aws --version
+
+      - name: Download newest R2 database backup
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/restore"
+          python3 - <<'PY'
+          import json, os, subprocess
+          endpoint = os.environ["R2_ENDPOINT"].rstrip("/")
+          bucket = os.environ["BUCKET"]
+          response = subprocess.check_output([
+              "aws", "--endpoint-url", endpoint, "s3api", "list-objects-v2",
+              "--bucket", bucket, "--prefix", "daily/", "--output", "json"
+          ], text=True)
+          objects = [x for x in json.loads(response).get("Contents", [])
+                     if x["Key"].startswith("daily/hit2-") and x["Key"].endswith(".dump")]
+          if not objects:
+              raise SystemExit("No .dump backup found under daily/")
+          key = max(objects, key=lambda x: x["LastModified"])["Key"]
+          with open(os.environ["GITHUB_ENV"], "a") as out:
+              out.write("BACKUP_KEY=" + key + "\n")
+          print("Selected backup:", key)
+          PY
+          aws --endpoint-url "${R2_ENDPOINT%/}" s3 cp \
+            "s3://$BUCKET/$BACKUP_KEY" "$RUNNER_TEMP/restore/latest.dump" --only-show-errors
+          test -s "$RUNNER_TEMP/restore/latest.dump"
+
+      - name: Restore into disposable PostgreSQL 18
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$RUNNER_TEMP/restore:/backup:ro" postgres:18 \
+            pg_restore --list /backup/latest.dump > "$RUNNER_TEMP/restore/toc.txt"
+          docker run --rm --network host \
+            -e PGPASSWORD=restoretest_local_only \
+            -v "$RUNNER_TEMP/restore:/backup:ro" postgres:18 \
+            pg_restore --host 127.0.0.1 --port 5432 --username restoretest \
+            --dbname restoretest --no-owner --no-acl --exit-on-error \
+            /backup/latest.dump
+
+      - name: Verify expected bot tables and restored rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e PGPASSWORD=restoretest_local_only postgres:18 \
+            psql -h 127.0.0.1 -U restoretest -d restoretest -v ON_ERROR_STOP=1 \
+            -Atc "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename" \
+            > "$RUNNER_TEMP/restore/tables.txt"
+          for table in boss_types boss_kills chat_settings; do
+            if ! grep -Fxq "$table" "$RUNNER_TEMP/restore/tables.txt"; then
+              echo "::error::Expected table missing after restore: $table"
+              exit 1
+            fi
+          done
+          docker run --rm --network host \
+            -e PGPASSWORD=restoretest_local_only postgres:18 \
+            psql -h 127.0.0.1 -U restoretest -d restoretest -v ON_ERROR_STOP=1 \
+            -c "SELECT 'boss_types' AS table_name, count(*) AS rows FROM public.boss_types UNION ALL SELECT 'boss_kills', count(*) FROM public.boss_kills UNION ALL SELECT 'chat_settings', count(*) FROM public.chat_settings"
+          echo "Restore test passed: expected tables exist and row counts were queried."
+
+      - name: Remove local backup
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/restore"
