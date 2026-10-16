@@ -32,7 +32,7 @@ jobs:
                   try: data=json.load(error)
                   except Exception: data={}
               result={"check":label,"http":status,"success":bool(data.get("success")),"error_codes":[x.get("code") for x in data.get("errors",[])]}
-              if label=="token": result["status"]=data.get("result",{}).get("status")
+              if label=="token": result["status"]=(data.get("result") or {}).get("status")
               print(json.dumps(result))
               if not data.get("success"): okay=False
           if not okay: raise SystemExit(1)
