@@ -28,3 +28,11 @@ test('production adapter uses production database and blocks reminder and Discor
   assert.equal(health.mode,'production');
   assert.equal(health.reminders_enabled,false);
 });
+
+test('production forwards the original execution context to preserve webhook lifetime', async () => {
+  const ctx = { waitUntil() {} };
+  let received;
+  const worker = createProductionWorker({worker: {fetch(_request,_env,context) {received=context; return new Response('ok');}}});
+  await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),credentials,ctx);
+  assert.equal(received,ctx);
+});

@@ -24,6 +24,47 @@ async function signedRequest(body, env = enabledEnv) {
  return new Request('https://staging.example/callback', {method:'POST',body,headers:{'x-line-signature':signature}});
 }
 
+test('slow first database claim is retained after webhook disconnect without duplicate commands', async () => {
+ let release, claimed;
+ const gate = new Promise(resolve => {release=resolve;});
+ const started = new Promise(resolve => {claimed=resolve;});
+ const store = memoryEventStore();
+ const originalClaim=store.claim;
+ store.claim=async id=>{claimed();await gate;return originalClaim(id);};
+ let commands=0,replies=0;
+ const app=createWorker({eventStoreFactory:()=>store,
+  commandHandler:async()=>{commands++;return {type:'text',text:'ok'};},
+  fetcher:async()=>{replies++;return new Response(null,{status:200});}
+ });
+ const retained=[];
+ const ctx={waitUntil(promise){assert.equal(this,ctx);retained.push(promise);}};
+ const body=JSON.stringify({events:[{type:'message',webhookEventId:'slow-first-event',replyToken:'test-only',source:{groupId:'test-group'},message:{type:'text',text:'KB'}}]});
+ const request=await signedRequest(body);
+ const controller=new AbortController();
+ const response=app.fetch(new Request(request,{signal:controller.signal}),enabledEnv,ctx);
+ await started;
+ assert.equal(retained.length,1);
+ assert.equal(commands,0);
+ controller.abort();
+ release();
+ assert.equal((await response).status,200);
+ assert.equal((await retained[0]).status,200);
+ assert.equal((await app.fetch(await signedRequest(body),enabledEnv,ctx)).status,200);
+ assert.equal(commands,1);
+ assert.equal(replies,1);
+});
+
+test('retained background lifetime preserves failure status and signature validation',async()=>{
+ const retained=[];
+ const ctx={waitUntil(p){retained.push(p);}};
+ const app=createWorker({eventStoreFactory:()=>memoryEventStore(),commandHandler:async()=>({type:'text',text:'ok'}),fetcher:async()=>new Response(null,{status:503})});
+ const body=JSON.stringify({events:[{type:'message',webhookEventId:'reply-failure',replyToken:'test-only',source:{groupId:'test-group'},message:{type:'text',text:'KB'}}]});
+ assert.equal((await app.fetch(new Request('https://staging.example/callback',{method:'POST',body}),enabledEnv,ctx)).status,401);
+ assert.equal(retained.length,0);
+ assert.equal((await app.fetch(await signedRequest(body),enabledEnv,ctx)).status,500);
+ assert.equal((await retained[0]).status,500);
+});
+
 test('signed LINE batch skips malformed events and isolates a reply failure', async () => {
  const commands = [], replies = [];
  const app = createWorker({

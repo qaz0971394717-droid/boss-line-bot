@@ -4,7 +4,7 @@ import { createWorker } from './index.js';
 // Never fall back to staging credentials or expose Discord/reminder routes.
 export function createProductionWorker({ worker = createWorker() } = {}) {
   return {
-    async fetch(request, env) {
+    async fetch(request, env, ctx) {
       const url = new URL(request.url);
       const enabled = env.PRODUCTION_MODE === 'true' && env.ENABLE_LINE === 'true';
       if (url.pathname === '/' && request.method === 'GET') {
@@ -25,7 +25,7 @@ export function createProductionWorker({ worker = createWorker() } = {}) {
         ADMIN_PASSWORD: env.ADMIN_PASSWORD,
         ENABLE_STAGING_REMINDERS: 'false',
         ENABLE_STAGING_DISCORD: 'false'
-      });
+      }, ctx);
     }
   };
 }

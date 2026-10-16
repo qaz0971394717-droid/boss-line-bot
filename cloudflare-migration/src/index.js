@@ -54,7 +54,7 @@ export function formatDiscordKb(rows) {
 
 export function createWorker({ commandHandler = handleLineCommand, fetcher = fetch, eventStoreFactory = createEventStore } = {}) {
  return {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
     if (url.pathname === "/callback" && request.method === "POST") {
@@ -68,6 +68,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
       try { payload = JSON.parse(body); } catch { return json({ error: "Invalid JSON" }, 400); }
       if (!payload || typeof payload !== "object" || !Array.isArray(payload.events)) return json({ error: "Invalid event payload" }, 400);
       const events = payload.events;
+      const processing = (async () => {
       const outcomes = [];
       let eventStore;
       for (const event of events) {
@@ -107,6 +108,12 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         }
       }
       return json({ processed: outcomes.length, failed: outcomes.filter(x => x === "failed").length }, outcomes.includes("failed") ? 500 : 200);
+      })();
+      // Retain in-flight processing if LINE closes the webhook connection while
+      // the database wakes up. Await the SAME promise so errors still yield 500
+      // and redelivery can reuse stored replies without replaying mutations.
+      if (ctx?.waitUntil) ctx.waitUntil(processing);
+      return processing;
     }
     if (url.pathname === "/discord/interactions" && request.method === "POST") {
       if (env.STAGING_MODE !== "true" || env.ENABLE_STAGING_DISCORD !== "true") return json({ error: "Staging Discord disabled. Do not switch production interactions." }, 503);
