@@ -67,6 +67,18 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
     await sql`INSERT INTO chat_settings(chat_id,half_mode) VALUES(${chatId},${enabled}) ON CONFLICT(chat_id) DO UPDATE SET half_mode=EXCLUDED.half_mode`;
     return textMessage(enabled?"⚡ HALF 減半模式：已開啟":"⏱️ HALF 減半模式：已關閉");
   }
+  if(upper.startsWith("KBKILL ")){
+    const bossKey=input.slice(7).trim().toLowerCase();
+    if(!bossKey)return textMessage("❌ 找不到這隻王，請重新輸入 KB。");
+    const bosses=await sql`SELECT boss_name,minutes FROM boss_types WHERE boss_key=${bossKey}`;
+    if(!bosses.length)return textMessage("❌ 找不到這隻王，請重新輸入 KB。");
+    const current=await sql`SELECT boss_name FROM boss_kills WHERE chat_id=${chatId} AND boss_key=${bossKey}`;
+    if(!current.length)return textMessage("❌ 這筆紀錄已不存在，請重新輸入 KB。");
+    const half=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
+    const boss=bosses[0],respawn=new Date(now.getTime()+Number(boss.minutes)*60000*(half[0]?.half_mode?0.5:1));
+    await sql`UPDATE boss_kills SET kill_time=${now.toISOString()},respawn_time=${respawn.toISOString()} WHERE chat_id=${chatId} AND boss_key=${bossKey}`;
+    return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}`);
+  }
   if(upper.startsWith("K ")){
     const parts=input.split(/\s+/);
     if(parts.length!==2&&parts.length!==3)return textMessage("❌ K 王格式錯誤");
