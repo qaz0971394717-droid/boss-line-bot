@@ -3,14 +3,14 @@
 import { neon } from "@neondatabase/serverless";
 
 export const getChatId = source => source?.groupId || source?.roomId || source?.userId || "unknown";
-export const taipeiTime = date => new Intl.DateTimeFormat("en-GB", { timeZone:"Asia/Taipei",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23" }).format(date).replace(/^([0-9]{2})\/([0-9]{2}),? /,"$1/$2 ");
+export const taipeiTime = date => { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Taipei",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(date).map(x=>[x.type,x.value])); return `${p.month}/${p.day} ${p.hour}:${p.minute}:${p.second}`; };
 export const textMessage = text => ({type:"text",text});
 
 export function parseKillTime(input, now = new Date()) {
   if (!/^\d{4}(\d{2})?$/.test(input)) return null;
   const hh=Number(input.slice(0,2)),mm=Number(input.slice(2,4)),ss=Number(input.slice(4,6)||0);
   if(hh>23||mm>59||ss>59) return null;
-  const day=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
+  const day=new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
   const parsed=new Date(`${day}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}+08:00`);
   return Number.isNaN(parsed.getTime())?null:parsed;
 }
