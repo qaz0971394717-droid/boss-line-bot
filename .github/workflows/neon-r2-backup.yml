@@ -45,7 +45,7 @@ jobs:
             "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
             -o "$RUNNER_TEMP/awscliv2.zip"
           unzip -q "$RUNNER_TEMP/awscliv2.zip" -d "$RUNNER_TEMP"
-          sudo "$RUNNER_TEMP/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
+          sudo "$RUNNER_TEMP/aws/install" --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
           docker run --rm postgres:18 pg_dump --version
           aws --version
 
