@@ -40,3 +40,11 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - On staging reminder schedule/cancel failure, LINE commands show that the boss database write succeeded but the reminder was **not confirmed**. Administrator boss deletion warns for each affected chat whose cancellation failed.
 - Reminder transport rejects a staging endpoint equal to `REMINDER_WORKER_URL`, or reuse of `REMINDER_API_KEY` when these production settings are supplied. Do not grant staging Worker access to production reminder secrets.
 - Failed reminder requests are not yet retried or queued durably. Never treat this staging code as verified production reminder delivery.
+
+## Handoff verification (2026-10-16)
+- LINE reply and reminder HTTP requests abort after five seconds and reject redirects. They are not automatically retried: a timed-out request may already have changed remote state.
+- A LINE reply failure is reported as a failed batch, while later events in that batch are still processed. Malformed events and events without a known chat are skipped; invalid signed top-level payloads return HTTP 400.
+- Apply `sql/002_staging_line_events.sql` only to the isolated staging database before enabling LINE. Durable `webhookEventId` claims prevent redelivery from running a command again; stored replies may be retried, and acknowledged deliveries are skipped.
+- If a command crashes or its reply cannot be saved after a database mutation, its claim stays pending and redelivery fails closed. Reconcile the database/reminder state manually; do not automatically expire or delete pending claims. This favors preventing duplicate mutations over automatic recovery and does not provide atomic exactly-once delivery across PostgreSQL and external APIs.
+- A successful LINE reply whose delivery marker cannot be stored may still be retried with an already-used reply token. This requires operator reconciliation; automatic replay of the command is never attempted.
+- Staging has not been deployed or checked against a real isolated Neon database in this handoff. Cloudflare sign-in and isolated staging secrets are required to perform that verification.

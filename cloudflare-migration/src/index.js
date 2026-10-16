@@ -1,5 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 import { handleLineCommand, getChatId } from "./line-commands.js";
+import { fetchWithTimeout } from "./http.js";
+import { createEventStore } from "./events.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const bytes = (s) => new TextEncoder().encode(s);
@@ -50,7 +52,8 @@ export function formatDiscordKb(rows) {
   return result.length > 2000 ? result.slice(0, 1950) + "\n\n…資料較多，已省略部分項目。" : result;
 }
 
-export default {
+export function createWorker({ commandHandler = handleLineCommand, fetcher = fetch, eventStoreFactory = createEventStore } = {}) {
+ return {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
@@ -63,24 +66,36 @@ export default {
       }
       let payload;
       try { payload = JSON.parse(body); } catch { return json({ error: "Invalid JSON" }, 400); }
-      const events = Array.isArray(payload.events) ? payload.events : [];
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.events)) return json({ error: "Invalid event payload" }, 400);
+      const events = payload.events;
       const outcomes = [];
+      let eventStore;
       for (const event of events) {
+        if (!event || typeof event !== "object") continue;
         if (event.mode === "standby" || !event.replyToken) continue;
         const chatId = getChatId(event.source);
-        const command = event.type === "message" && event.message?.type === "text" ? event.message.text : event.type === "postback" && event.postback?.data?.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
+        if (chatId === "unknown") continue;
+        const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
         if (!command) continue;
         try {
-          const reply = await handleLineCommand(command, chatId, env);
-          const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+          if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");
+          eventStore ||= eventStoreFactory(env);
+          const claim = await eventStore.claim(event.webhookEventId);
+          if (claim.state === "done") { outcomes.push("ok"); continue; }
+          if (claim.state === "pending") throw new Error("Event requires reconciliation");
+          const reply = claim.state === "ready" ? claim.reply : await commandHandler(command, chatId, env);
+          if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
+          const res = await fetchWithTimeout("https://api.line.me/v2/bot/message/reply", {
             method: "POST",
             headers: { Authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "Content-Type": "application/json" },
             body: JSON.stringify({ replyToken: event.replyToken, messages: [reply] })
-          });
+          }, fetcher);
           if (!res.ok) throw new Error(`LINE reply HTTP ${res.status}`);
+          await eventStore.delivered(event.webhookEventId);
           outcomes.push("ok");
         } catch (e) {
-          console.error("Staging LINE processing failed:", e?.name, e?.message);
+          // Provider error text can contain URLs or credentials. Log only type.
+          console.error("Staging LINE processing failed:", e?.name);
           outcomes.push("failed");
         }
       }
@@ -93,6 +108,7 @@ export default {
       if (!ok) return new Response("Invalid signature", { status: 401 });
       let payload;
       try { payload = JSON.parse(body); } catch { return json({ error: "Invalid JSON" }, 400); }
+      if (!payload || typeof payload !== "object") return json({ error: "Invalid interaction payload" }, 400);
       if (payload.type === 1) return json({ type: 1 });
       if (payload.type === 2 && payload.data?.name?.toLowerCase() === "kb") {
         if (!env.DISCORD_KB_LINE_CHAT_ID || !env.STAGING_DATABASE_URL) return json({ type: 4, data: { content: "❌ Discord 資料庫設定尚未完成。", flags: 64 } });
@@ -109,4 +125,7 @@ export default {
     }
     return new Response("Not Found", { status: 404 });
   }
-};
+ };
+}
+
+export default createWorker();
