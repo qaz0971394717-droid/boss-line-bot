@@ -28,14 +28,14 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
   if(!env.STAGING_DATABASE_URL) return textMessage("❌ 測試資料庫尚未設定。");
   const sql=neon(env.STAGING_DATABASE_URL);
   const input=command.trim(), upper=input.toUpperCase();
-  if(input==="群組ID"||upper==="GROUPID")return textMessage("🆔 目前聊天室 ID\\n\\n"+chatId);
+  if(input==="群組ID"||upper==="GROUPID")return textMessage("🆔 目前聊天室 ID\n\n"+chatId);
   if(input==="測試"||upper==="TEST"){
     const rows=await sql`SELECT half_mode FROM chat_settings WHERE chat_id=${chatId}`;
-    return textMessage("✅ BOSS Bot 正常運作！\\n目前："+(rows[0]?.half_mode?"⚡ HALF 減半模式":"⏱️ 正常模式")+"\\n資料庫：PostgreSQL");
+    return textMessage("✅ BOSS Bot 正常運作！\n目前："+(rows[0]?.half_mode?"⚡ HALF 減半模式":"⏱️ 正常模式")+"\n資料庫：PostgreSQL");
   }
   if(upper==="RESTART"){
     const deleted=await sql`DELETE FROM boss_kills WHERE chat_id=${chatId} RETURNING boss_name`;
-    return textMessage(`🔄 RESTART 完成\\n已清除目前聊天室全部死亡紀錄。\\n共清除 ${deleted.length} 筆紀錄。\\n\\nHALF 設定不受影響。`);
+    return textMessage(`🔄 RESTART 完成\n已清除目前聊天室全部死亡紀錄。\n共清除 ${deleted.length} 筆紀錄。\n\nHALF 設定不受影響。`);
   }
   if(input==="王列表"||upper==="BOSS列表"){
     const rows=await sql`SELECT boss_name,minutes FROM boss_types ORDER BY minutes ASC,boss_name ASC`;
@@ -53,7 +53,7 @@ export async function handleLineCommand(command, chatId, env, now=new Date()) {
         for(let i=0;i<names.length;i+=5)lines.push(names.slice(i,i+5).join("、"));
       }
     }
-    return textMessage(lines.join("\\n").slice(0,4900));
+    return textMessage(lines.join("\n").slice(0,4900));
   }
   if(upper==="KB"||input==="王"||upper==="BOSS"){
     const rows=await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id=${chatId} ORDER BY respawn_time ASC`;
