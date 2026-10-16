@@ -31,7 +31,7 @@ test('signed LINE batch skips malformed events and isolates a reply failure', as
   commandHandler: async (command, chatId) => { commands.push([command,chatId]); return {type:'text',text:'ok'}; },
   fetcher: async (url, options) => {
    assert.equal(url, 'https://api.line.me/v2/bot/message/reply');
-   assert.equal(options.redirect, 'error');
+   assert.equal(options.redirect, 'manual');
    assert.ok(options.signal instanceof AbortSignal);
    replies.push(JSON.parse(options.body));
    return new Response(null, {status: replies.length === 1 ? 503 : 200});

@@ -1,0 +1,8 @@
+name = "hit2-boss-production"
+main = "src/production.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+PRODUCTION_MODE = "true"
+ENABLE_LINE = "true"
+ENABLE_ADMIN = "true"
