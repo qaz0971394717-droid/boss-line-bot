@@ -40,8 +40,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-18 awscli
-          pg_dump --version
+          sudo apt-get install -y -qq awscli
+          docker run --rm postgres:18 pg_dump --version
           aws --version
 
       - name: Create compressed database backup
@@ -52,10 +52,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/neon-backup"
           stamp="$(date -u +%Y%m%dT%H%M%SZ)"
           echo "BACKUP_STAMP=$stamp" >> "$GITHUB_ENV"
-          pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-acl \
-            --file="$RUNNER_TEMP/neon-backup/hit2-$stamp.dump"
+          docker run --rm \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -v "$RUNNER_TEMP/neon-backup:/backup" \
+            postgres:18 pg_dump --dbname="$DATABASE_URL" --format=custom --no-owner --no-acl \
+            --file="/backup/hit2-$stamp.dump"
           test -s "$RUNNER_TEMP/neon-backup/hit2-$stamp.dump"
-          pg_restore --list "$RUNNER_TEMP/neon-backup/hit2-$stamp.dump" >/dev/null
+          docker run --rm -v "$RUNNER_TEMP/neon-backup:/backup:ro" \
+            postgres:18 pg_restore --list "/backup/hit2-$stamp.dump" >/dev/null
 
       - name: Upload backup to private R2
         shell: bash
