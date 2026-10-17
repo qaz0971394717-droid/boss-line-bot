@@ -17,5 +17,10 @@ const list=await api('/d1/database?per_page=100');const matches=list.filter(d=>d
 const db=matches[0]||await api('/d1/database',{name:'hongzhe-personal-memo'});
 if(['db692969-0b74-4dc5-952a-604847e15628','dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5'].includes(db.uuid))throw Error('Memo database must be isolated');
 const result=await api(`/d1/database/${db.uuid}/query`,{sql:readFileSync('schema.sql','utf8')+';'+GOOGLE_SCHEMA});if(result.some(r=>!r.success))throw Error('Memo schema failed');
+const columns=(await api('/d1/database/'+db.uuid+'/query',{sql:'PRAGMA table_info(memo_items)'}))[0].results;
+if(!columns.some(c=>c.name==='notice_minutes')){
+ const altered=await api('/d1/database/'+db.uuid+'/query',{sql:'ALTER TABLE memo_items ADD COLUMN notice_minutes INTEGER CHECK(notice_minutes BETWEEN 0 AND 10080)'});
+ if(altered.some(row=>!row.success))throw Error('Notice setting schema preparation failed');
+}
 writeFileSync('wrangler.toml',`name = "hongzhe-personal-memo"\nmain = "src/index.js"\ncompatibility_date = "2026-10-01"\n[[d1_databases]]\nbinding = "MEMO_DB"\ndatabase_name = "hongzhe-personal-memo"\ndatabase_id = "${db.uuid}"\n`);
 console.log('Memo isolated D1 ready. Existing bot databases were not changed.');

@@ -1,3 +1,5 @@
+import {GOOGLE_SCHEMA} from '../src/google.js';
+import {getNoticeMinutes,noticeLabel,noticeError} from '../src/notice.js';
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';
 import {parseReminder,calendarUrl} from '../src/calendar.js';import {runCommand,knownCommand,itemCard} from '../src/commands.js';import {createWorker} from '../src/index.js';
 const owner='U'+'1'.repeat(32),other='U'+'2'.repeat(32);
@@ -36,7 +38,7 @@ test('reminder cards are concise and deletion offers both choices without immedi
  const {db,binding}=fixture();try{
  db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','簡單小卡',?,?,?,'card')").run(owner,new Date(Date.now()+3600000).toISOString(),new Date().toISOString(),new Date().toISOString());
  const item=db.prepare('SELECT * FROM memo_items').get();const card=itemCard(item,true);
- assert.deepEqual(card.contents.footer.contents.map(b=>b.action.label),['確認新增至日曆','刪除']);
+ assert.deepEqual(card.contents.footer.contents.map(b=>b.action.label),['確認新增至日曆','提醒時間：提前10分鐘','刪除']);
  const menu=await runCommand('刪除 1',{db:binding,owner,eventId:'menu'});
  assert.deepEqual(menu.quickReply.items.map(b=>b.action.label),['只刪備忘','備忘＋日曆一起刪','取消']);assert.equal(db.prepare('SELECT deleted_at FROM memo_items').get().deleted_at,null);
  assert.match((await runCommand('取消刪除 1',{db:binding,owner,eventId:'cancel'})).text,/已取消/);
@@ -90,5 +92,46 @@ test('natural note and query aliases work and reminder text produces one review 
  const card=await run('提醒 明天下午3點要去考HPE6 A85考試');assert.equal(card.type,'flex');
  const reminder=db.prepare("SELECT content,due_at FROM memo_items WHERE kind='reminder'").get();assert.equal(reminder.content,'要去考HPE6 A85考試');assert.equal(reminder.due_at,'2026-10-18T07:00:00.000Z');
  const count=db.prepare('SELECT count(*) n FROM memo_items').get().n;const error=await run('明天3點考試');assert.match(error.text,/早上／下午/);assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,count);
+ }finally{db.close();}
+});
+
+test('notice labels, defaults and expiry checks match actual notification times',()=>{
+ const now=Date.parse('2026-10-17T04:00:00Z');
+ assert.equal(getNoticeMinutes({due_at:'2026-10-17T07:00:00Z'},now),10);
+ assert.equal(getNoticeMinutes({due_at:'2026-10-17T04:03:00Z'},now),0);
+ assert.equal(getNoticeMinutes({due_at:'2026-10-17T07:00:00Z',notice_minutes:60},now),60);
+ assert.deepEqual([0,10,30,60,1440,45].map(noticeLabel),['準時','提前10分鐘','提前30分鐘','提前1小時','提前1天','提前45分鐘']);
+ assert.equal(noticeError({due_at:'2026-10-17T07:00:00Z'},60,now),null);
+ assert.match(noticeError({due_at:'2026-10-17T04:03:00Z'},10,now),/已經過了/);
+});
+test('notice menu is read-only and selection produces an updated card without adding a calendar event',async()=>{
+ const {db,binding}=fixture();db.exec(GOOGLE_SCHEMA);
+ const env={GOOGLE_CLIENT_ID:'configured',GOOGLE_CLIENT_SECRET:'configured',GOOGLE_TOKEN_KEY:'configured'};
+ try{
+ const due=new Date(Date.now()+3*86400000).toISOString();
+ db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','下午3點考試',?,?,?,'notice')").run(owner,due,new Date().toISOString(),new Date().toISOString());
+ const run=(input,who=owner)=>runCommand(input,{db:binding,owner:who,eventId:'menu',env,fetcher:async()=>{throw Error('must not add Google event');}});
+ const menu=await run('提醒設定 1');
+ assert.deepEqual(menu.quickReply.items.map(x=>x.action.label),['準時','提前10分鐘','提前30分鐘','提前1小時','提前1天','自訂分鐘']);
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,null);
+ assert.match((await run('提醒設定 1',other)).text,/找不到/);
+ assert.match((await run('自訂提醒 1')).text,/提前提醒 1 45/);
+ const card=await run('提前提醒 1 60');assert.equal(card.type,'flex');
+ assert.ok(JSON.stringify(card).includes('提前1小時'));assert.ok(JSON.stringify(card).includes('加入 Google 日曆後才會通知'));
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,60);
+ assert.equal(db.prepare('SELECT due_at FROM memo_items').get().due_at,due);
+ assert.equal(db.prepare('SELECT count(*) n FROM memo_calendar_events').get().n,0);
+ }finally{db.close();}
+});
+test('signed notice postback applies the selected lead without creating another reminder',async()=>{
+ const {db,binding}=fixture();db.exec(GOOGLE_SCHEMA);
+ const env={LINE_CHANNEL_SECRET:'test-secret',LINE_CHANNEL_ACCESS_TOKEN:'token',OWNER_LINE_USER_ID:owner,MEMO_DB:binding,GOOGLE_CLIENT_ID:'configured',GOOGLE_CLIENT_SECRET:'configured',GOOGLE_TOKEN_KEY:'configured'};
+ try{
+ db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','考試',?,?,?,'notice-postback')").run(owner,new Date(Date.now()+3*86400000).toISOString(),new Date().toISOString(),new Date().toISOString());
+ let calls=0;const worker=createWorker({fetcher:async(url,options)=>{calls++;assert.equal(url,'https://api.line.me/v2/bot/message/reply');assert.ok(JSON.stringify(JSON.parse(options.body)).includes('提前1小時'));return Response.json({});}});
+ const e={...event('notice-selection'),type:'postback',postback:{data:'memo:notice:1:60'}};delete e.message;
+ assert.equal((await worker.fetch(await signed({events:[e]}),env)).status,200);
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,60);
+ assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,1);assert.equal(calls,1);
  }finally{db.close();}
 });

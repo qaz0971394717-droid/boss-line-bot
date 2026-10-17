@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS memo_items (
  kind TEXT NOT NULL CHECK(kind IN ('note','task','reminder')),
  content TEXT NOT NULL,
  due_at TEXT,
+ notice_minutes INTEGER CHECK(notice_minutes BETWEEN 0 AND 10080),
  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','done')),
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL,

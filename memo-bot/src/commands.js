@@ -1,4 +1,5 @@
-import {linkCalendar,calendarStatus,addCalendarEvent,deleteCalendarAndMemo} from './google.js';
+import {getNoticeMinutes,noticeLabel} from './notice.js';
+import {linkCalendar,calendarStatus,addCalendarEvent,deleteCalendarAndMemo,setNoticeMinutes} from './google.js';
 import {parseReminder,taipeiDay,displayTime,calendarUrl,isReminderInput} from './calendar.js';
 const text=value=>({type:'text',text:value});
 const action=(label,value)=>({type:'action',action:{type:'message',label,text:value}});
@@ -15,7 +16,7 @@ export function normalizeMemoCommand(raw){
  return input;
 }
 
-export const knownCommand=input=>isReminderInput(input)||/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(normalizeMemoCommand(input));
+export const knownCommand=input=>isReminderInput(input)||/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|提醒設定\s+\d+|自訂提醒\s+\d+|提前提醒\s+\d+\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(normalizeMemoCommand(input));
 const help=(googleReady=false)=>({
  ...text('📒 我的備忘\n\n📝 記事情\n備忘 買牛奶\n\n🔔 設提醒\n明天下午3點提醒我拿包裹\n\n📋 看待辦\n今天待辦\n\n🔎 找筆記\n查備忘 牛奶\n\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
  quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表')]}
@@ -24,10 +25,11 @@ export function itemCard(item,googleReady=false){
  const button=(label,command)=>({type:'button',height:'sm',style:'secondary',action:{type:'message',label,text:command}});
  const buttons=[];
  if(item.due_at&&item.status!=='done')buttons.push({type:'button',height:'sm',style:'primary',action:googleReady?{type:'postback',label:'確認新增至日曆',data:'memo:calendar:'+item.id,displayText:'確認新增日曆 #'+item.id}:{type:'uri',label:'加入 Google 日曆',uri:calendarUrl(item)}});
+ if(item.due_at&&item.status!=='done'&&googleReady)buttons.push(button('提醒時間：'+noticeLabel(getNoticeMinutes(item)),`提醒設定 ${item.id}`));
  if(item.kind!=='note'&&item.kind!=='reminder')buttons.push(button(item.status==='done'?'重新待辦':'完成',`${item.status==='done'?'取消完成':'完成'} ${item.id}`));
  if(item.kind!=='reminder')buttons.push(button('電腦版可複製文字',`文字 ${item.id}`));
  buttons.push(button('刪除',`刪除 ${item.id}`));
- return {type:'flex',altText:`個人備忘 #${item.id} ${item.content.slice(0,60)}`,contents:{type:'bubble',size:'mega',body:{type:'box',layout:'vertical',spacing:'md',contents:[{type:'text',text:`#${item.id} ${item.kind==='note'?'備忘':item.status==='done'?'已完成':'待辦'}`,weight:'bold',size:'md',color:'#334155'},{type:'text',text:item.content,wrap:true,size:'md'},...(item.due_at?[{type:'text',text:`時間：${displayTime(item.due_at)}（台灣）`,wrap:true,size:'sm'},{type:'text',text:googleReady?'點確認即新增，預設提前10分鐘；不足10分鐘則於開始時通知。刪除時可選擇是否一併移除日曆。':'日曆需另外按「儲存」，並確認通知設定；LINE 不會主動提醒，也不會同步日曆變更。',wrap:true,size:'xs',color:'#64748B'}]:[])]},footer:{type:'box',layout:'vertical',spacing:'sm',contents:buttons}}};
+ return {type:'flex',altText:`個人備忘 #${item.id} ${item.content.slice(0,60)}`,contents:{type:'bubble',size:'mega',body:{type:'box',layout:'vertical',spacing:'md',contents:[{type:'text',text:`#${item.id} ${item.kind==='note'?'備忘':item.status==='done'?'已完成':'待辦'}`,weight:'bold',size:'md',color:'#334155'},{type:'text',text:item.content,wrap:true,size:'md'},...(item.due_at?[{type:'text',text:`時間：${displayTime(item.due_at)}（台灣）`,wrap:true,size:'sm'},{type:'text',text:googleReady?`通知：${displayTime(new Date(new Date(item.due_at).getTime()-getNoticeMinutes(item)*60000).toISOString())}（${noticeLabel(getNoticeMinutes(item))}）`:'日曆需另外按「儲存」，並確認通知設定；LINE 不會主動提醒，也不會同步日曆變更。',wrap:true,size:'xs',color:'#64748B'}]:[])]},footer:{type:'box',layout:'vertical',spacing:'sm',contents:buttons}}};
 }
 export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},fetcher=fetch}){
  const googleReady=Boolean(env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET&&env.GOOGLE_TOKEN_KEY);
@@ -35,6 +37,27 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
  if(input==='連結日曆')return linkCalendar(env,owner);
  if(input==='日曆狀態')return calendarStatus({...env,MEMO_DB:db},owner);
  if(/^加入日曆 \d+$/.test(input))return addCalendarEvent({...env,MEMO_DB:db},owner,Number(input.split(' ')[1]),fetcher);
+ const noticeCommand=input.match(/^(提醒設定|自訂提醒|提前提醒)\s+(\d+)(?:\s+(\d+))?$/);
+ if(noticeCommand){
+  const [,verb,rawId,rawMinutes]=noticeCommand,id=Number(rawId);
+  const item=await query(db,'SELECT * FROM memo_items WHERE owner_id=? AND id=? AND deleted_at IS NULL',owner,id).first();
+  if(!item||!item.due_at)return text('找不到這筆提醒。');
+  if(!googleReady)return text('請先完成 Google 日曆串接，再設定提前通知。');
+  if(verb==='自訂提醒')return text('輸入「提前提醒 '+id+' 45」可設為提前45分鐘。\n0 表示準時，最多10080分鐘（7天）。');
+  if(verb==='提前提醒'){
+   if(rawMinutes===undefined)return text('請輸入「提前提醒 '+id+' 45」，或按提醒時間選項。');
+   const result=await setNoticeMinutes({...env,MEMO_DB:db},owner,id,Number(rawMinutes),fetcher);
+   if(!result.text.startsWith('✅'))return result;
+   const updated=await query(db,'SELECT * FROM memo_items WHERE owner_id=? AND id=? AND deleted_at IS NULL',owner,id).first();
+   const card=itemCard(updated,googleReady);
+   card.contents.body.contents.push({type:'text',text:result.text,wrap:true,size:'xs',color:'#166534'});
+   return card;
+  }
+  return {...text('#'+id+' '+item.content+'\n事項：'+displayTime(item.due_at)+'\n要提前多久提醒？'),quickReply:{items:[
+   ...[0,10,30,60,1440].map(minutes=>({type:'action',action:{type:'postback',label:noticeLabel(minutes),data:'memo:notice:'+id+':'+minutes,displayText:'#'+id+' '+noticeLabel(minutes)}})),
+   action('自訂分鐘','自訂提醒 '+id)
+  ]}};
+ }
  if(input==='指令'||input.toUpperCase()==='HELP')return help(googleReady);
  if(input==='測試')return text('✅ 個人備忘正常｜僅限本人私訊使用\n資料庫：Cloudflare D1\n提醒方式：手動加入 Google 日曆');
  const note=input.match(/^(備忘|待辦)[:：\s]+(.+)$/s);

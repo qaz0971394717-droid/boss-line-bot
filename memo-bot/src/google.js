@@ -1,3 +1,4 @@
+import {getNoticeMinutes,noticeLabel,noticeError} from './notice.js';
 import {fetchLineReply} from './http.js';
 const origin='https://hongzhe-personal-memo.qaz0971394717.workers.dev';
 export const GOOGLE_SCOPE='https://www.googleapis.com/auth/calendar.app.created';
@@ -74,6 +75,8 @@ async function addCalendarEventUnlocked(env,owner,itemId,fetcher=fetch){
  const mapping=await q(db,'SELECT * FROM memo_calendar_events WHERE item_id=?',itemId).first();
  if(mapping?.state==='added')return message(`✅ #${itemId} 已加入 Google 日曆，不會重複新增。`);
  if(new Date(item.due_at).getTime()<=Date.now())return message('提醒時間已過，未新增日曆。');
+ const noticeMinutes=getNoticeMinutes(item);
+ const expiredNotice=noticeError(item,noticeMinutes);if(expiredNotice&&!mapping)return message(expiredNotice);
  try{
  const stored=await unseal(connection.credentials,env),r=await tokenRequest(env,{grant_type:'refresh_token',refresh_token:stored.refreshToken},fetcher);if(!r.ok)return message('Google 授權已失效，請輸入「連結日曆」重新授權。');
  const token=await r.json();if(!token.access_token)throw Error('Access token missing');
@@ -81,14 +84,13 @@ async function addCalendarEventUnlocked(env,owner,itemId,fetcher=fetch){
  if(mapping&&mapping.calendar_id!==connection.calendar_id)throw Error('Calendar mapping mismatch');
  await q(db,"INSERT INTO memo_calendar_events VALUES(?,?,?,'pending') ON CONFLICT(item_id) DO NOTHING",itemId,connection.calendar_id,eventId).run();
  const path='calendars/'+encodeURIComponent(connection.calendar_id)+'/events',ownerKey=await digest(owner);
- const noticeMinutes=new Date(item.due_at).getTime()-Date.now()<=600000?0:10;
  const event={id:eventId,summary:item.content,start:{dateTime:item.due_at,timeZone:'Asia/Taipei'},end:{dateTime:new Date(new Date(item.due_at).getTime()+1800000).toISOString(),timeZone:'Asia/Taipei'},reminders:{useDefault:false,overrides:[{method:'popup',minutes:noticeMinutes}]},extendedProperties:{private:{memoId:String(itemId),memoOwner:ownerKey}}};
  let accepted=false;
  if(mapping){const existing=await calendarApi(path+'/'+eventId,token.access_token,{},fetcher);if(existing.ok){const data=await existing.json();accepted=data.status!=='cancelled'&&data.extendedProperties?.private?.memoId===String(itemId)&&data.extendedProperties?.private?.memoOwner===ownerKey;if(!accepted)throw Error('Existing event mismatch');}else if(existing.status!==404)throw Error('Event lookup failed');}
- if(!accepted){const created=await calendarApi(path,token.access_token,{method:'POST',body:event},fetcher);if(created.ok)accepted=true;else if(created.status===409){const existing=await calendarApi(path+'/'+eventId,token.access_token,{},fetcher);if(existing.ok){const data=await existing.json();accepted=data.status!=='cancelled'&&data.extendedProperties?.private?.memoId===String(itemId)&&data.extendedProperties?.private?.memoOwner===ownerKey;}}}
+ if(!accepted){if(expiredNotice)return message(expiredNotice);const created=await calendarApi(path,token.access_token,{method:'POST',body:event},fetcher);if(created.ok)accepted=true;else if(created.status===409){const existing=await calendarApi(path+'/'+eventId,token.access_token,{},fetcher);if(existing.ok){const data=await existing.json();accepted=data.status!=='cancelled'&&data.extendedProperties?.private?.memoId===String(itemId)&&data.extendedProperties?.private?.memoOwner===ownerKey;}}}
  if(!accepted)throw Error('Calendar event not confirmed');
  await q(db,"UPDATE memo_calendar_events SET state='added' WHERE item_id=? AND event_id=?",itemId,eventId).run();
- return message(`✅ #${itemId} 已加入 Google 日曆，${noticeMinutes?'提前 10 分鐘':'於開始時間'}通知。\n請確認 Android 允許 Google 日曆通知。`);
+ return message(`✅ #${itemId} 已加入 Google 日曆，${noticeLabel(noticeMinutes)}通知。\n請確認 Android 允許 Google 日曆通知。`);
  }catch(error){console.error('Google calendar event failed:',error.name);return message('尚未確認日曆新增成功，請稍後再點一次。系統會使用相同事件編號，避免重複新增。');}
 }
 
@@ -146,5 +148,33 @@ export async function deleteCalendarAndMemo(env,owner,itemId,fetcher=fetch){
    await q(db,'UPDATE memo_items SET deleted_at=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL',new Date().toISOString(),new Date().toISOString(),owner,itemId).run();
    return message('✅ #'+itemId+' 備忘與日曆行程已刪除。');
   }catch(error){console.error('Google calendar deletion failed:',error.name);return message('尚未確認日曆刪除成功，備忘已保留。請稍後重試；不會刪除其他行程。');}
+ });
+}
+
+export async function setNoticeMinutes(env,owner,itemId,minutes,fetcher=fetch){
+ return withCalendarLock(env,owner,itemId,async()=>{
+  const db=env.MEMO_DB,item=await q(db,'SELECT * FROM memo_items WHERE owner_id=? AND id=? AND deleted_at IS NULL',owner,itemId).first();
+  const invalid=noticeError(item,minutes);if(invalid)return message(invalid);
+  const mapping=await q(db,'SELECT * FROM memo_calendar_events WHERE item_id=?',itemId).first();
+  if(mapping?.state==='pending')return message('上一筆日曆新增結果尚未確認，請先重新點「確認新增至日曆」，再調整通知時間。');
+  if(mapping?.state==='deleted')return message('這筆日曆行程已刪除，請重新建立提醒。');
+  if(mapping?.state==='added'){
+   if(!configured(env))return message('Google 串接未完成，尚未變更通知時間。');
+   const connection=await q(db,'SELECT * FROM google_connections WHERE owner_id=?',owner).first();
+   if(!connection||connection.calendar_id!==mapping.calendar_id)return message('日曆連結不符，尚未變更通知時間。');
+   try{
+    const stored=await unseal(connection.credentials,env),r=await tokenRequest(env,{grant_type:'refresh_token',refresh_token:stored.refreshToken},fetcher);
+    if(!r.ok)return message('Google 授權失效，請輸入「連結日曆」重新授權，通知時間尚未變更。');
+    const access=(await r.json()).access_token;if(!access)throw Error('Missing access token');
+    const path='calendars/'+encodeURIComponent(mapping.calendar_id)+'/events/'+encodeURIComponent(mapping.event_id);
+    const current=await calendarApi(path,access,{},fetcher);if(!current.ok)throw Error('Event lookup failed');
+    const event=await current.json();
+    if(event.status==='cancelled'||event.extendedProperties?.private?.memoId!==String(itemId)||event.extendedProperties?.private?.memoOwner!==await digest(owner))throw Error('Event ownership mismatch');
+    const changed=await googleFetch('https://www.googleapis.com/calendar/v3/'+path+'?sendUpdates=none',{method:'PATCH',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json',...(event.etag?{'If-Match':event.etag}:{})},body:JSON.stringify({reminders:{useDefault:false,overrides:[{method:'popup',minutes}]}})},fetcher);
+    if(!changed.ok)throw Error('Reminder update not confirmed');
+   }catch(error){console.error('Google reminder update failed:',error.name);return message('尚未確認日曆通知更新成功，請稍後重試；不會更改行程日期或時間。');}
+  }
+  await q(db,'UPDATE memo_items SET notice_minutes=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL',minutes,new Date().toISOString(),owner,itemId).run();
+  return message('✅ #'+itemId+' 已設為'+noticeLabel(minutes)+'。'+(mapping?.state==='added'?'\nGoogle 日曆通知已同步更新。':'\n加入 Google 日曆後才會通知。'));
  });
 }

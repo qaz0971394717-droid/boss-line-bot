@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';
-import {GOOGLE_SCHEMA,GOOGLE_SCOPE,seal,unseal,googleRoute,linkCalendar,addCalendarEvent,deleteCalendarAndMemo} from '../src/google.js';
+import {GOOGLE_SCHEMA,GOOGLE_SCOPE,seal,unseal,googleRoute,linkCalendar,addCalendarEvent,deleteCalendarAndMemo,setNoticeMinutes,digest} from '../src/google.js';
 const owner='U'+'1'.repeat(32),origin='https://hongzhe-personal-memo.qaz0971394717.workers.dev';
 function fixture(){const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));db.exec(GOOGLE_SCHEMA);const binding={prepare(sql){const make=p=>({async all(){return {success:true,results:db.prepare(sql).all(...p)};},async first(){return db.prepare(sql).get(...p);},async run(){return db.prepare(sql).run(...p);}});return {...make([]),bind(...p){return make(p);}};}};return {db,env:{MEMO_DB:binding,OWNER_LINE_USER_ID:owner,GOOGLE_CLIENT_ID:'fake-client',GOOGLE_CLIENT_SECRET:'fake-client-secret',GOOGLE_TOKEN_KEY:Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url')}};}
 test('OAuth credentials are encrypted with authenticated encryption and wrong keys fail',async()=>{const {db,env}=fixture();try{const encoded=await seal({refreshToken:'private-refresh'},env);assert.ok(!encoded.includes('private-refresh'));assert.deepEqual(await unseal(encoded,env),{refreshToken:'private-refresh'});await assert.rejects(unseal(encoded,{...env,GOOGLE_TOKEN_KEY:Buffer.alloc(32).toString('base64url')}));}finally{db.close();}});
@@ -83,6 +83,82 @@ test('near-term reminders notify at event time rather than at an already-past te
  db.prepare('INSERT INTO google_connections VALUES(?,?,?,?)').run(owner,'memo@example.test',await seal({refreshToken:'refresh'},env),new Date().toISOString());
  db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','三分鐘後提醒',?,?,?,'near')").run(owner,new Date(Date.now()+180000).toISOString(),new Date().toISOString(),new Date().toISOString());
  const fetcher=async(url,options)=>{if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'access'});const data=JSON.parse(options.body);assert.equal(data.reminders.overrides[0].minutes,0);return Response.json({id:data.id});};
- assert.match((await addCalendarEvent(env,owner,1,fetcher)).text,/於開始時間/);
+ assert.match((await addCalendarEvent(env,owner,1,fetcher)).text,/準時/);
  }finally{db.close();}
+});
+
+test('notice settings validate offsets and preserve other owners and existing dates',async()=>{
+ const {db,env}=await deletionFixture();try{
+ db.exec("DELETE FROM memo_calendar_events;UPDATE memo_items SET due_at='"+new Date(Date.now()+3*86400000).toISOString()+"'");
+ const due=db.prepare('SELECT due_at FROM memo_items').get().due_at;
+ const never=async()=>{throw Error('local selection must not contact Google');};
+ assert.match((await setNoticeMinutes(env,'U'+'2'.repeat(32),1,60,never)).text,/不存在/);
+ for(const minutes of [0,10,30,60,1440,45]){
+  assert.match((await setNoticeMinutes(env,owner,1,minutes,never)).text,/已設為/);
+  assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,minutes);
+  assert.equal(db.prepare('SELECT due_at FROM memo_items').get().due_at,due);
+ }
+ for(const minutes of [-1,10081,1.5]){
+  assert.match((await setNoticeMinutes(env,owner,1,minutes,never)).text,/0～10080/);
+  assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,45);
+ }
+ db.prepare('UPDATE memo_items SET due_at=?').run(new Date(Date.now()+1800000).toISOString());
+ assert.match((await setNoticeMinutes(env,owner,1,60,never)).text,/已經過了/);
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,45);
+ }finally{db.close();}
+});
+test('chosen lead time is used at Google creation and stale choices do not create pending mappings',async()=>{
+ const {db,env}=await deletionFixture();try{
+ db.exec('DELETE FROM memo_calendar_events');
+ db.prepare('UPDATE memo_items SET due_at=?,notice_minutes=60').run(new Date(Date.now()+3*3600000).toISOString());
+ let posts=0;
+ const fetcher=async(url,options)=>{
+  if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'access'});
+  posts++;const payload=JSON.parse(options.body);assert.equal(payload.reminders.overrides[0].minutes,60);
+  assert.equal(payload.start.dateTime,db.prepare('SELECT due_at FROM memo_items').get().due_at);
+  return Response.json({id:payload.id});
+ };
+ assert.match((await addCalendarEvent(env,owner,1,fetcher)).text,/提前1小時/);assert.equal(posts,1);
+ db.exec('DELETE FROM memo_calendar_events');
+ db.prepare('UPDATE memo_items SET due_at=?').run(new Date(Date.now()+1800000).toISOString());
+ assert.match((await addCalendarEvent(env,owner,1,fetcher)).text,/已經過了/);
+ assert.equal(db.prepare('SELECT count(*) n FROM memo_calendar_events').get().n,0);assert.equal(posts,1);
+ }finally{db.close();}
+});
+test('existing calendar notice updates only reminders after verifying ownership and etag',async()=>{
+ const {db,env}=await deletionFixture();try{
+ db.prepare('UPDATE memo_items SET due_at=?').run(new Date(Date.now()+3*3600000).toISOString());
+ const due=db.prepare('SELECT due_at FROM memo_items').get().due_at;let patches=0;
+ const fetcher=async(url,options)=>{
+  if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'access'});
+  if(options.method==='PATCH'){
+   patches++;assert.ok(url.endsWith('/events/memo123?sendUpdates=none'));assert.equal(options.headers['If-Match'],'version1');
+   assert.deepEqual(JSON.parse(options.body),{reminders:{useDefault:false,overrides:[{method:'popup',minutes:60}]}});
+   return Response.json({id:'memo123'});
+  }
+  assert.equal(options.method,undefined);
+  return Response.json({etag:'version1',extendedProperties:{private:{memoId:'1',memoOwner:await digest(owner)}}});
+ };
+ assert.match((await setNoticeMinutes(env,owner,1,60,fetcher)).text,/已同步更新/);assert.equal(patches,1);
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,60);
+ assert.equal(db.prepare('SELECT due_at FROM memo_items').get().due_at,due);
+ }finally{db.close();}
+});
+test('foreign events, Google failures and unresolved adds never claim updated notices',async()=>{
+ for(const mode of ['foreign','authorization','precondition','timeout','pending']){
+ const {db,env}=await deletionFixture();try{
+ db.prepare('UPDATE memo_items SET due_at=?,notice_minutes=10').run(new Date(Date.now()+3*3600000).toISOString());
+ if(mode==='pending')db.exec("UPDATE memo_calendar_events SET state='pending'");
+ let patches=0;
+ const fetcher=async(url,options)=>{
+  if(mode==='pending')throw Error('unresolved add must not send requests');
+  if(url.includes('oauth2.googleapis.com'))return mode==='authorization'?new Response('{}',{status:400}):Response.json({access_token:'access'});
+  if(options.method==='PATCH'){patches++;if(mode==='timeout')throw Error('response lost');return new Response('{}',{status:412});}
+  return Response.json({etag:'v1',extendedProperties:{private:{memoId:mode==='foreign'?'999':'1',memoOwner:await digest(owner)}}});
+ };
+ const result=await setNoticeMinutes(env,owner,1,60,fetcher);assert.ok(!result.text.startsWith('✅'),mode);
+ assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,10);
+ if(['foreign','authorization','pending'].includes(mode))assert.equal(patches,0);
+ }finally{db.close();}
+ }
 });
