@@ -1,5 +1,5 @@
 import {createSql} from './database.js';
-export const knownCommand=text=>/^(?:HELP|指令|管理指令|群組ID|GROUPID|測試|TEST|RESTART|清除KB|王列表|BOSS列表|KB|王|BOSS|HALF(?:\s+(?:ON|OFF))?)$/i.test(text.trim())||/^(?:K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王)\s+/i.test(text.trim());
+export const knownCommand=text=>/^(?:HELP|指令|進階指令|管理指令|群組ID|GROUPID|測試|TEST|RESTART|清除KB|王列表|BOSS列表|KB|王|BOSS|HALF(?:\s+(?:ON|OFF))?)$/i.test(text.trim())||/^(?:K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王)\s+/i.test(text.trim());
 export async function shouldProcessCommand(text,chatId,env,context){
  if(knownCommand(text)||(env.ENABLE_OPS_ALERTS==='true'&&text.trim()==='啟用異常通知'))return true;
  const sql=createSql(env);
