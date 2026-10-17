@@ -1,3 +1,4 @@
+import {notifyOps} from './notify-ops.mjs';
 import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {validateReceipt,cleanEvents,INDEX_SQL} from './retention-core.mjs';
@@ -53,8 +54,12 @@ async function main(){
  const issues=await gh('/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100');
  const existing=issues.find(issue=>issue.title===title&&!issue.pull_request&&issue.user?.login==='github-actions[bot]');
  if(warnings.length){
-  if(existing)await gh('/issues/'+existing.number,'PATCH',{body});else await gh('/issues','POST',{title,body});
+  const issue=existing||await gh('/issues','POST',{title,body});
+  const marker='<!-- line-alert-sent -->';
+  let alerted=Boolean(issue.body?.includes(marker));
+  if(!alerted)alerted=await notifyOps({target,kind:'alert',message:warnings.join('；'),incident:issue.number});
+  await gh('/issues/'+issue.number,'PATCH',{body:body+(alerted?'\n'+marker:'')});
   for(const warning of warnings)console.log('::warning::'+warning);
- }else if(existing&&process.env.D1_BACKUP_STATUS==='success'&&process.env.D1_CLEANUP_STATUS==='success'){await gh('/issues/'+existing.number,'PATCH',{state:'closed',body:body+'\n\n本次檢查已恢復正常，自動關閉警示。'});}
+ }else if(existing&&process.env.D1_BACKUP_STATUS==='success'&&process.env.D1_CLEANUP_STATUS==='success'){const sent=await notifyOps({target,kind:'recovery',incident:existing.number});if(!sent)return;await gh('/issues/'+existing.number,'PATCH',{state:'closed',body:body+'\n\n本次檢查已恢復正常，自動關閉警示。'});}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(error=>{console.error('::error::D1 maintenance stopped safely:',error.name);process.exitCode=1;});

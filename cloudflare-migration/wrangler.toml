@@ -2,6 +2,7 @@ name = "hit2-boss-staging"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 [vars]
+ENABLE_OPS_ALERTS = "true"
 STAGING_MODE = "true"
 ENABLE_STAGING_LINE = "true"
 ENABLE_STAGING_ADMIN = "true"

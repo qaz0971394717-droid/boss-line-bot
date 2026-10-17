@@ -1,3 +1,4 @@
+import {opsRoute,bindAlerts} from './ops-alerts.js';
 import { shouldProcessCommand } from "./command-filter.js";
 import { expiredEvent } from "./retention-policy.js";
 import { migrationGate } from "./migration.js";
@@ -59,6 +60,8 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
  return {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const ops = await opsRoute(request,env,fetcher);
+    if(ops)return ops;
     const maintenance = await migrationGate(request, env);
     if (maintenance) return maintenance;
     if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", database_backend: env.DATABASE_BACKEND === "d1" ? "d1" : "neon", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
@@ -97,7 +100,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           if (claim.state === "done") { outcomes.push("ok"); continue; }
           if (claim.state === "pending") throw new Error("Event requires reconciliation");
           stage = "command";
-          const reply = claim.state === "ready" ? claim.reply : await commandHandler(command, chatId, env, new Date(context.eventTimestamp), context);
+          const reply = claim.state === "ready" ? claim.reply : (await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, env, new Date(context.eventTimestamp), context));
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
           if(!reply){await eventStore.delivered(event.webhookEventId);outcomes.push('ok');continue;}
