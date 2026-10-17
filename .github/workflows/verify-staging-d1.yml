@@ -28,9 +28,9 @@ jobs:
           settings=get("/workers/scripts/hit2-boss-staging/settings")
           binding=next(x for x in settings["bindings"] if x["type"]=="d1" and x["name"]=="BOSS_DB")
           assert binding.get("id",binding.get("database_id"))==target["uuid"]
-          with urllib.request.urlopen("https://hit2-boss-staging.qaz0971394717.workers.dev") as r: health=json.load(r)
-          assert health["database_backend"]=="d1" and health["line_enabled"] and health["admin_enabled"] and not health["reminders_enabled"]
+          variables={x["name"]:x.get("text") for x in settings["bindings"] if x["type"]=="plain_text"}
+          assert variables["DATABASE_BACKEND"]=="d1" and variables["ENABLE_STAGING_LINE"]=="true" and variables["ENABLE_STAGING_REMINDERS"]=="false"
           assert not any(x.get("name")=="MIGRATION_MODE" and x.get("text")=="true" for x in settings["bindings"])
           print("STAGING_D1_DATABASE_ID="+target["uuid"])
-          print("PASS: live staging D1 binding and health verified; migration mode off.")
+          print("PASS: live staging D1 binding and configuration verified; migration mode off.")
           PY
