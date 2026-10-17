@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  issues: write
 concurrency:
   group: d1-production-backup
   cancel-in-progress: false
@@ -28,11 +29,31 @@ jobs:
       - run: npm ci
       - run: python3 -m pip install boto3
       - name: Back up production D1 to private R2
+        id: backup
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          D1_BACKUP_RECEIPT: ${{ runner.temp }}/d1-production-receipt.json
           WRANGLER_SEND_METRICS: 'false'
         run: node scripts/backup-d1-production.mjs
+      - name: Clean completed event storage after verified backup
+        id: cleanup
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_BACKUP_RECEIPT: ${{ runner.temp }}/d1-production-receipt.json
+          D1_MAINTENANCE_RESULT: ${{ runner.temp }}/d1-production-maintenance.json
+        run: node scripts/maintain-d1.mjs cleanup production
+      - name: Check usage and publish deduplicated alerts
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          D1_MAINTENANCE_RESULT: ${{ runner.temp }}/d1-production-maintenance.json
+          D1_BACKUP_STATUS: ${{ steps.backup.outcome }}
+          D1_CLEANUP_STATUS: ${{ steps.cleanup.outcome }}
+        run: node scripts/maintain-d1.mjs monitor production
