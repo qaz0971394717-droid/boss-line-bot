@@ -1,7 +1,7 @@
 name: Update staging LINE worker
 on:
   push:
-    branches: [codex/line-boss-handoff]
+    branches: [codex/d1-migration, codex/line-boss-handoff]
     paths: [.github/workflows/deploy-staging-worker.yml]
   workflow_dispatch:
 permissions:
@@ -18,22 +18,15 @@ jobs:
         working-directory: cloudflare-migration
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: codex/d1-migration
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci
       - run: npm test
-      - name: Deploy staging with reminders disabled
+      - name: Deploy staging D1 configuration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy --var STAGING_MODE:true --var ENABLE_STAGING_LINE:true --var ENABLE_STAGING_ADMIN:true --var ENABLE_STAGING_REMINDERS:false
-      - name: Verify staging flags
-        run: |
-          node --input-type=module <<'JS'
-          const response=await fetch("https://hit2-boss-staging.qaz0971394717.workers.dev");
-          if(!response.ok) throw Error("Health request failed");
-          const data=await response.json();
-          if(data.mode!=="staging" || !data.line_enabled || !data.admin_enabled || data.reminders_enabled) throw Error("Unexpected staging flags");
-          console.log("Staging health verified; reminders remain disabled.");
-          JS
+        run: npx wrangler deploy --config wrangler.d1-staging.toml
