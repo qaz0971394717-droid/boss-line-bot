@@ -1,3 +1,4 @@
+import { expiredEvent } from "./retention-policy.js";
 import { migrationGate } from "./migration.js";
 import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
@@ -81,6 +82,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         if (chatId === "unknown") continue;
         const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
         if (!command) continue;
+        if (expiredEvent(event)) continue;
         let stage = "event-validation";
         try {
           if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");

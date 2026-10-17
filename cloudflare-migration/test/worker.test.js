@@ -199,3 +199,11 @@ test('staging health flags remain false by default', async () => {
  assert.equal(health.admin_enabled,false);
  assert.equal(health.reminders_enabled,false);
 });
+
+test('expired signed event is acknowledged without claiming or rerunning a pruned command',async()=>{
+ let touched=0;
+ const app=createWorker({eventStoreFactory:()=>{touched++;throw Error('must not claim');},commandHandler:async()=>{touched++;},fetcher:async()=>{touched++;}});
+ const body=JSON.stringify({events:[{type:'message',timestamp:Date.now()-15*86400000,webhookEventId:'pruned-event',replyToken:'old',source:{groupId:'test-group'},message:{type:'text',text:'K 大象H'}}]});
+ assert.equal((await app.fetch(await signedRequest(body),enabledEnv)).status,200);
+ assert.equal(touched,0);
+});
