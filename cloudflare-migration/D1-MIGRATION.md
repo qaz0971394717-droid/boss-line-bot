@@ -1,8 +1,8 @@
 # D1 migration candidate — not enabled in production
 
-The production and existing staging workers continue using Neon. No live data
-has been copied, changed, or deleted by this branch. Do not enable D1 on either
-worker before completing the checks below.
+The production worker continues using Neon; the staging worker now uses D1. Production data has only been copied for disposable restore drills; production
+writes and configuration have not been changed. Do not enable D1 on the production
+worker before completing the remaining checks below.
 
 ## Implemented
 
@@ -15,13 +15,24 @@ worker before completing the checks below.
 - SQLite integration tests exercise command operations, event claims and migration.
   These are not a substitute for testing a real D1 binding in Workers.
 
-## Current blocker
+## Authorization and verified progress
 
-The existing GitHub Cloudflare token returned HTTP 401 for the D1 database-list
-endpoint on 2026-10-17. The token's previously recorded permissions did not include
-D1. Grant Account > D1 > Edit for the intended account. Keep existing Workers
-permissions for deployment, then rerun `.github/workflows/check-d1-access.yml`.
-No API token should be pasted into chat or source files.
+Token authorization now passes. Real D1 command tests and a Neon snapshot -> D1
+-> R2 -> independent D1 restore drill passed. Production snapshot contained 62
+boss types, 35 kills, 2 chat settings and 8 event records, compared across all
+five tables without logging private row contents.
+
+Staging has now been migrated to D1 using its OWN source snapshot: 62 boss types,
+0 kills, 1 chat setting and 41 event records. Its R2 backup was restored and
+compared before activation. The initial post-deploy health request failed, so
+activation was conservatively marked uncertain; subsequent independent API
+verification confirmed the exact D1 binding, flags, and disabled migration mode.
+Public health separately reported database_backend=d1. Do not rerun the staging
+migration as a rollback. Use wrangler.d1-staging.toml for future staging deploys.
+
+Production still uses Neon. Live LINE validation of staging, production
+maintenance/synchronization/cutover and recurring D1 production backups remain
+required. No API token should be pasted into chat or source files.
 
 ## Safe completion order
 
@@ -48,6 +59,6 @@ No API token should be pasted into chat or source files.
 
 ## Remaining work
 
-Cloud D1 validation, migration data comparison, D1 R2 backup/restore automation,
-production maintenance gate, final synchronization and cutover have NOT been
-completed. No claim is made that this candidate fixes the first-message problem.
+Live staging LINE validation, recurring D1 production backup scheduling, a
+production maintenance gate, final synchronization and production cutover have
+NOT been completed. No claim is made that this candidate fixes the first-message problem.

@@ -61,8 +61,13 @@ assert hashlib.sha256(open(a,'rb').read()).digest()==hashlib.sha256(open(a+'.dow
  const restoreConfig=config('restore',{...base,d1_databases:[{...binding,database_id:restoreId}]});
  cli(['d1','execute','BOSS_DB','--remote','--file',backup+'.download','--config',restoreConfig,'--yes']);await compare(restoreId);local.close();
  stage='activate-staging-d1';activationAttempted=true;cli(['deploy','--config',finalConfig]);
- const after=await (await fetch(url)).json();
- if(after.database_backend!=='d1'||!after.line_enabled||!after.admin_enabled||after.reminders_enabled)throw Error('Unexpected staging health');
+ let healthy=false;
+ for(let attempt=0;attempt<6;attempt++){
+  try { const response=await fetch(url,{cache:'no-store'}); const after=await response.json(); healthy=response.ok&&after.database_backend==='d1'&&after.line_enabled&&after.admin_enabled&&!after.reminders_enabled; } catch {}
+  if(healthy)break;
+  await new Promise(resolve=>setTimeout(resolve,2000));
+ }
+ if(!healthy)throw Error('Staging health requires independent verification');
  console.log('STAGING_D1_DATABASE_ID='+createdId);
  console.log('PASS: staging now uses D1; original staging data preserved; private R2 backup restored and compared. Production unchanged.');
 }catch(error){console.error('Staging migration failed at:',stage,'type:',error.name);process.exitCode=1;
