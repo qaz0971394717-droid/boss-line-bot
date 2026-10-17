@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS google_states(hash TEXT PRIMARY KEY,owner_id TEXT NOT
 CREATE INDEX IF NOT EXISTS google_ticket_expiry ON google_tickets(expires_at);
 CREATE INDEX IF NOT EXISTS google_state_expiry ON google_states(expires_at);
 CREATE TABLE IF NOT EXISTS google_connections(owner_id TEXT PRIMARY KEY,calendar_id TEXT NOT NULL,credentials TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memo_calendar_locks(item_id INTEGER PRIMARY KEY,token TEXT NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS memo_calendar_events(item_id INTEGER PRIMARY KEY,calendar_id TEXT NOT NULL,event_id TEXT NOT NULL,state TEXT NOT NULL);
 `;
 const bytes=x=>new TextEncoder().encode(x),q=(db,s,...p)=>db.prepare(s).bind(...p);
@@ -64,7 +65,7 @@ export async function googleRoute(request,env,fetcher=fetch){
  }catch(error){console.error('Google calendar connection failed:',error.name);return page('Google 日曆連結未完成。請確認 API 已啟用、授權設定正確，再回 LINE 輸入「連結日曆」重試。',502);}
 }
 export async function calendarStatus(env,owner){const connection=await q(env.MEMO_DB,'SELECT calendar_id FROM google_connections WHERE owner_id=?',owner).first();return message(connection?'✅ 已連結專用 Google 日曆「弘哲備忘」。\n新增提醒後，點「確認新增至日曆」即可加入。':'尚未連結 Google 日曆，請輸入「連結日曆」。');}
-export async function addCalendarEvent(env,owner,itemId,fetcher=fetch){
+async function addCalendarEventUnlocked(env,owner,itemId,fetcher=fetch){
  if(!configured(env))return message('Google 串接尚未設定完成。');
  const db=env.MEMO_DB,item=await q(db,'SELECT * FROM memo_items WHERE owner_id=? AND id=? AND deleted_at IS NULL',owner,itemId).first();
  if(!item||!item.due_at)return message('這筆提醒不存在或未設定時間。');
@@ -88,4 +89,61 @@ export async function addCalendarEvent(env,owner,itemId,fetcher=fetch){
  await q(db,"UPDATE memo_calendar_events SET state='added' WHERE item_id=? AND event_id=?",itemId,eventId).run();
  return message(`✅ #${itemId} 已加入 Google 日曆，提前 10 分鐘通知。\n請確認 Android 允許 Google 日曆通知。`);
  }catch(error){console.error('Google calendar event failed:',error.name);return message('尚未確認日曆新增成功，請稍後再點一次。系統會使用相同事件編號，避免重複新增。');}
+}
+
+async function withCalendarLock(env,owner,itemId,operation){
+ const item=await q(env.MEMO_DB,'SELECT id FROM memo_items WHERE owner_id=? AND id=? AND deleted_at IS NULL',owner,itemId).first();
+ if(!item)return message('這筆提醒不存在或已刪除。');
+ const token=random(),now=Date.now();
+ const locked=await q(env.MEMO_DB,'INSERT INTO memo_calendar_locks VALUES(?,?,?) ON CONFLICT(item_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at WHERE memo_calendar_locks.expires_at<? RETURNING token',itemId,token,now+120000,now).all();
+ if(!locked.results.length)return message('這筆日曆事項正在處理，請稍後再試。');
+ try{return await operation();}
+ finally{await q(env.MEMO_DB,'DELETE FROM memo_calendar_locks WHERE item_id=? AND token=?',itemId,token).run();}
+}
+export async function addCalendarEvent(env,owner,itemId,fetcher=fetch){
+ if(!configured(env))return message('Google 串接尚未設定完成。');
+ return withCalendarLock(env,owner,itemId,()=>addCalendarEventUnlocked(env,owner,itemId,fetcher));
+}
+export async function deleteCalendarAndMemo(env,owner,itemId,fetcher=fetch){
+ if(!configured(env))return message('Google 串接尚未設定，備忘未刪除。');
+ return withCalendarLock(env,owner,itemId,async()=>{
+  const db=env.MEMO_DB;
+  const mapping=await q(db,'SELECT * FROM memo_calendar_events WHERE item_id=?',itemId).first();
+  if(!mapping)return message('找不到這筆備忘對應的機器人日曆行程，未刪除。若曾手動加入日曆，請到 Google 日曆自行移除；或選「只刪備忘」。');
+  const connection=await q(db,'SELECT * FROM google_connections WHERE owner_id=?',owner).first();
+  if(!connection||connection.calendar_id!==mapping.calendar_id)return message('日曆連結不符，備忘未刪除。請重新連結原本的 Google 帳號。');
+  try{
+   if(mapping.state!=='deleted'){
+    const stored=await unseal(connection.credentials,env);
+    const refreshed=await tokenRequest(env,{grant_type:'refresh_token',refresh_token:stored.refreshToken},fetcher);
+    if(!refreshed.ok)return message('Google 授權失效，備忘未刪除。請輸入「連結日曆」重新授權。');
+    const access=(await refreshed.json()).access_token;if(!access)throw Error('Access token missing');
+    const calendarPath='calendars/'+encodeURIComponent(mapping.calendar_id),eventPath=calendarPath+'/events/'+encodeURIComponent(mapping.event_id);
+    const current=await calendarApi(eventPath,access,{},fetcher);
+    let absent=false,etag;
+    if(current.status===410)absent=true;
+    else if(current.status===404){
+     const calendar=await calendarApi(calendarPath,access,{},fetcher);
+     if(!calendar.ok)throw Error('Calendar not accessible');
+     absent=true;
+    }else if(current.ok){
+     const event=await current.json();
+     if(event.status==='cancelled')absent=true;
+     else {
+      if(event.extendedProperties?.private?.memoId!==String(itemId)||event.extendedProperties?.private?.memoOwner!==await digest(owner))throw Error('Calendar event ownership mismatch');
+      if(event.attendees?.length)return message('這個行程已有受邀者，未自動刪除，備忘保留。請到 Google 日曆確認後處理。');
+      etag=event.etag;
+     }
+    }else throw Error('Calendar event verification failed');
+    if(!absent){
+     // The exact stored event ID and its ownership marker were verified above.
+     const removed=await googleFetch('https://www.googleapis.com/calendar/v3/'+eventPath+'?sendUpdates=none',{method:'DELETE',headers:{Authorization:'Bearer '+access,...(etag?{'If-Match':etag}:{})}},fetcher);
+     if(!removed.ok&&removed.status!==410)throw Error('Calendar deletion not confirmed');
+    }
+    await q(db,"UPDATE memo_calendar_events SET state='deleted' WHERE item_id=? AND calendar_id=? AND event_id=?",itemId,mapping.calendar_id,mapping.event_id).run();
+   }
+   await q(db,'UPDATE memo_items SET deleted_at=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL',new Date().toISOString(),new Date().toISOString(),owner,itemId).run();
+   return message('✅ #'+itemId+' 備忘與日曆行程已刪除。');
+  }catch(error){console.error('Google calendar deletion failed:',error.name);return message('尚未確認日曆刪除成功，備忘已保留。請稍後重試；不會刪除其他行程。');}
+ });
 }

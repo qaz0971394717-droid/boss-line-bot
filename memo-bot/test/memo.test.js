@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';
-import {parseReminder,calendarUrl} from '../src/calendar.js';import {runCommand,knownCommand} from '../src/commands.js';import {createWorker} from '../src/index.js';
+import {parseReminder,calendarUrl} from '../src/calendar.js';import {runCommand,knownCommand,itemCard} from '../src/commands.js';import {createWorker} from '../src/index.js';
 const owner='U'+'1'.repeat(32),other='U'+'2'.repeat(32);
 function fixture(){const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));const binding={prepare(sql){const make=p=>({async all(){return {success:true,results:db.prepare(sql).all(...p)};},async first(){return db.prepare(sql).get(...p);},async run(){return db.prepare(sql).run(...p);}});return {...make([]),bind(...p){return make(p);}};}};return {db,binding};}
 test('Taipei reminder parsing validates leap days, month end, clocks and expired inputs',()=>{
@@ -31,3 +31,17 @@ test('webhook verifies signatures and filters strangers, groups and ordinary cha
  }finally{db.close();}});
 test('reply failure reuses stored reply and pending claims fail closed',async()=>{const {db,binding}=fixture();const env={LINE_CHANNEL_SECRET:'test-secret',LINE_CHANNEL_ACCESS_TOKEN:'token',OWNER_LINE_USER_ID:owner,MEMO_DB:binding};let fail=true;const worker=createWorker({fetcher:async()=>new Response('{}',{status:fail?503:200})});try{const e=event();assert.equal((await worker.fetch(await signed({events:[e]}),env)).status,500);fail=false;assert.equal((await worker.fetch(await signed({events:[e]}),env)).status,200);assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,1);db.prepare("INSERT INTO memo_events VALUES('pending','pending',NULL,?,?)").run(new Date().toISOString(),new Date().toISOString());assert.equal((await worker.fetch(await signed({events:[event('pending')]}),env)).status,500);assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,1);}finally{db.close();}});
 test('supported commands and search length reject irrelevant text',()=>{for(const s of ['指令','備忘 電池','提醒 明天 15:00 維修','待辦 2','今天待辦','查看 1'])assert.ok(knownCommand(s),s);assert.ok(!knownCommand('聊天內容'));});
+
+test('reminder cards are concise and deletion offers both choices without immediate changes',async()=>{
+ const {db,binding}=fixture();try{
+ db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','簡單小卡',?,?,?,'card')").run(owner,new Date(Date.now()+3600000).toISOString(),new Date().toISOString(),new Date().toISOString());
+ const item=db.prepare('SELECT * FROM memo_items').get();const card=itemCard(item,true);
+ assert.deepEqual(card.contents.footer.contents.map(b=>b.action.label),['確認新增至日曆','刪除']);
+ const menu=await runCommand('刪除 1',{db:binding,owner,eventId:'menu'});
+ assert.deepEqual(menu.quickReply.items.map(b=>b.action.label),['只刪備忘','備忘＋日曆一起刪','取消']);assert.equal(db.prepare('SELECT deleted_at FROM memo_items').get().deleted_at,null);
+ assert.match((await runCommand('取消刪除 1',{db:binding,owner,eventId:'cancel'})).text,/已取消/);
+ await runCommand('確認刪除 1',{db:binding,owner,eventId:'note-only'});
+ assert.ok(db.prepare('SELECT deleted_at FROM memo_items').get().deleted_at);
+ assert.ok(knownCommand('連同日曆刪除 1'));
+ }finally{db.close();}
+});
