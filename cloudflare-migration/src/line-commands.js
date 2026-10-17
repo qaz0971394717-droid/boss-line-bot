@@ -1,3 +1,4 @@
+import {BIRTHDAY_COMMAND,birthdayEnabled,birthdayGreeting,addBirthdayButton} from './birthday.js';
 import {checkOverwrite,consumeOverwrite} from './overwrite-guard.js';
 import {undoEnvironment} from './undo.js';
 import {undoLast} from './undo.js';
@@ -31,6 +32,7 @@ export function parseRespawnTime(day,clock) {
 }
 
 export async function handleLineCommand(command, chatId, env, now=new Date(), context={}) {
+ if(command.trim()===BIRTHDAY_COMMAND)return birthdayEnabled(env,chatId)?birthdayGreeting():null;
  const confirmation=await consumeOverwrite(command,chatId,env,context.userId);
  if(confirmation?.reply)return confirmation.reply;
  if(confirmation?.row){const p=confirmation.row;return handleLineCommand(p.command,chatId,undoEnvironment(env,p.command,chatId,context.userId),new Date(p.requested_at),{...context,overwriteVersion:p.expected_version});}
@@ -106,7 +108,7 @@ async function runLineCommand(command, chatId, env, now=new Date(), context={}) 
   }
   if(upper==="KB"||input==="王"||upper==="BOSS"){
     const rows=await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id=${chatId} ORDER BY respawn_time ASC`;
-    if(upper==="KB")return createKbFlex(rows);
+    if(upper==="KB")return addBirthdayButton(createKbFlex(rows),env,chatId);
     if(!rows.length)return textMessage("📋 目前沒有 BOSS 紀錄。");
     return textMessage(rows.map(r=>`⚔️ ${r.boss_name}　${taipeiTime(new Date(r.respawn_time))}`).join("\n"));
   }
