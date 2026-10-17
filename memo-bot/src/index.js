@@ -1,3 +1,4 @@
+import {fetchLineReply} from './http.js';
 import {knownCommand,runCommand} from './commands.js';
 const encode=s=>new TextEncoder().encode(s);
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
@@ -33,8 +34,8 @@ export function createWorker({fetcher=fetch}={}){return {
       reply=await runCommand(command,{db,owner:env.OWNER_LINE_USER_ID,eventId:id,now:new Date(event.timestamp)});
       await q(db,"UPDATE memo_events SET state='ready',reply=?,updated_at=? WHERE event_id=?",JSON.stringify(reply),new Date().toISOString(),id).run();
      }
-     const response=await fetcher('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[reply]}),signal:AbortSignal.timeout(12000),redirect:'error'});
-     if(!response.ok)throw Error('LINE reply unavailable');
+     const response=await fetchLineReply('https://api.line.me/v2/bot/message/reply',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({replyToken:event.replyToken,messages:[reply]}),},fetcher);
+     if(!response.ok){console.error('Memo LINE HTTP status:',response.status);throw Error('LINE reply unavailable');}
      await q(db,"UPDATE memo_events SET state='delivered',updated_at=? WHERE event_id=?",new Date().toISOString(),id).run();
     }catch(error){console.error('Personal memo event failed:',error.name);failed++;}
    }
