@@ -49,9 +49,46 @@ test('reminder cards are concise and deletion offers both choices without immedi
 test('help shows concise everyday examples and three read-only shortcuts',async()=>{
  const {db,binding}=fixture();try{
  const help=await runCommand('指令',{db:binding,owner,eventId:'help',env:{GOOGLE_CLIENT_ID:'configured',GOOGLE_CLIENT_SECRET:'configured',GOOGLE_TOKEN_KEY:'configured'}});
- assert.match(help.text,/備忘 買牛奶/);assert.match(help.text,/提醒 明天 15:00 拿包裹/);
+ assert.match(help.text,/備忘 買牛奶/);assert.match(help.text,/明天下午3點提醒我拿包裹/);
  assert.ok(!/DL380|P11782|完成 編號|刪除 編號|Google 授權|2026-10-20/.test(help.text));
  assert.ok(help.text.length<200);assert.deepEqual(help.quickReply.items.map(x=>x.action.text),['今天待辦','待辦','備忘列表']);
  assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,0);
+ }finally{db.close();}
+});
+
+test('natural reminders accept common Chinese phrasing without losing title text',()=>{
+ const now=new Date('2026-10-17T04:47:00Z');
+ const cases=[
+ ['提醒 明天下午3點要去考HPE6 A85考試','2026-10-18T07:00:00.000Z','要去考HPE6 A85考試'],
+ ['明天下午三點提醒我拿包裹','2026-10-18T07:00:00.000Z','拿包裹'],
+ ['提醒我明天早上九點半去維修','2026-10-18T01:30:00.000Z','去維修'],
+ ['10/20 下午3:30 拿包裹','2026-10-20T07:30:00.000Z','拿包裹'],
+ ['2026/10/20 09:30 客戶維修','2026-10-20T01:30:00.000Z','客戶維修'],
+ ['下週一早上9點開會','2026-10-19T01:00:00.000Z','開會'],
+ ['下禮拜一早上9點開會','2026-10-19T01:00:00.000Z','開會'],
+ ['10分鐘後提醒我買牛奶','2026-10-17T04:57:00.000Z','買牛奶'],
+ ['提醒半小時後拿包裹','2026-10-17T05:17:00.000Z','拿包裹'],
+ ['明天下午三點十五分考試','2026-10-18T07:15:00.000Z','考試'],
+ ['提醒明天下午３點半 HPE6 A85','2026-10-18T07:30:00.000Z','HPE6 A85'],
+ ['10月20日中午12點聚餐','2026-10-20T04:00:00.000Z','聚餐']
+ ];
+ for(const [input,due,content] of cases){assert.ok(knownCommand(input),input);assert.deepEqual(parseReminder(input,now),{content,dueAt:due},input);}
+});
+test('ambiguous and invalid natural dates ask for clarification rather than guessing',()=>{
+ const now=new Date('2026-10-17T04:47:00Z');
+ for(const input of ['明天3點考試','明天買牛奶','明天下午3點','2月30日下午3點考試','明天下午3點70分考試','明天晚上12點拿包裹','提醒 每天 15:00 吃藥','提醒 0分鐘後 拿包裹'])assert.ok(parseReminder(input,now).error,input);
+ assert.equal(parseReminder('下週一早上9點開會',new Date('2026-10-19T04:00:00Z')).dueAt,'2026-10-26T01:00:00.000Z');
+ assert.ok(parseReminder('1/1 下午3點跨年',now).error);
+});
+test('natural note and query aliases work and reminder text produces one review card',async()=>{
+ const {db,binding}=fixture();let id=0;
+ const run=input=>runCommand(input,{db:binding,owner,eventId:'natural-'+(++id),now:new Date('2026-10-17T04:47:00Z')});
+ try{
+ assert.ok(knownCommand('幫我記一下買牛奶'));await run('幫我記一下買牛奶');
+ assert.match((await run('搜尋牛奶')).text,/買牛奶/);assert.match((await run('我的筆記')).text,/買牛奶/);
+ await run('待辦去郵局');assert.match((await run('今天有什麼事')).text,/去郵局/);
+ const card=await run('提醒 明天下午3點要去考HPE6 A85考試');assert.equal(card.type,'flex');
+ const reminder=db.prepare("SELECT content,due_at FROM memo_items WHERE kind='reminder'").get();assert.equal(reminder.content,'要去考HPE6 A85考試');assert.equal(reminder.due_at,'2026-10-18T07:00:00.000Z');
+ const count=db.prepare('SELECT count(*) n FROM memo_items').get().n;const error=await run('明天3點考試');assert.match(error.text,/早上／下午/);assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,count);
  }finally{db.close();}
 });

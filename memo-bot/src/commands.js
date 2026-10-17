@@ -1,11 +1,23 @@
 import {linkCalendar,calendarStatus,addCalendarEvent,deleteCalendarAndMemo} from './google.js';
-import {parseReminder,taipeiDay,displayTime,calendarUrl} from './calendar.js';
+import {parseReminder,taipeiDay,displayTime,calendarUrl,isReminderInput} from './calendar.js';
 const text=value=>({type:'text',text:value});
 const action=(label,value)=>({type:'action',action:{type:'message',label,text:value}});
 const query=(db,s,...p)=>db.prepare(s).bind(...p);
-export const knownCommand=input=>/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(input.trim());
+export function normalizeMemoCommand(raw){
+ const input=raw.trim();
+ if(['今天有什麼事','今天要做什麼','今天行程','今天提醒'].includes(input))return '今天待辦';
+ if(input==='備忘'||input==='筆記'||input==='我的筆記')return '備忘列表';
+ if(/^(?:備忘列表|待辦)(?:\s+\d+)?$/.test(input))return input;
+ const search=input.match(/^(?:查備忘|找筆記|查筆記|搜尋)[:：\s]*(.+)$/s);
+ if(search)return '查備忘 '+search[1].trim();
+ const note=input.match(/^(幫我記(?:一下|下|錄)?|記一下|記下|筆記|備忘|待辦)[:：\s]*(.+)$/s);
+ if(note)return (note[1]==='待辦'?'待辦':'備忘')+' '+note[2].trim();
+ return input;
+}
+
+export const knownCommand=input=>isReminderInput(input)||/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(normalizeMemoCommand(input));
 const help=(googleReady=false)=>({
- ...text('📒 我的備忘\n\n📝 記事情\n備忘 買牛奶\n\n🔔 設提醒\n提醒 明天 15:00 拿包裹\n\n📋 看待辦\n今天待辦\n\n🔎 找筆記\n查備忘 牛奶\n\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
+ ...text('📒 我的備忘\n\n📝 記事情\n備忘 買牛奶\n\n🔔 設提醒\n明天下午3點提醒我拿包裹\n\n📋 看待辦\n今天待辦\n\n🔎 找筆記\n查備忘 牛奶\n\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
  quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表')]}
 });
 export function itemCard(item,googleReady=false){
@@ -15,11 +27,11 @@ export function itemCard(item,googleReady=false){
  if(item.kind!=='note'&&item.kind!=='reminder')buttons.push(button(item.status==='done'?'重新待辦':'完成',`${item.status==='done'?'取消完成':'完成'} ${item.id}`));
  if(item.kind!=='reminder')buttons.push(button('電腦版可複製文字',`文字 ${item.id}`));
  buttons.push(button('刪除',`刪除 ${item.id}`));
- return {type:'flex',altText:`個人備忘 #${item.id} ${item.content.slice(0,60)}`,contents:{type:'bubble',size:'mega',body:{type:'box',layout:'vertical',spacing:'md',contents:[{type:'text',text:`#${item.id} ${item.kind==='note'?'備忘':item.status==='done'?'已完成':'待辦'}`,weight:'bold',size:'md',color:'#334155'},{type:'text',text:item.content,wrap:true,size:'md'},...(item.due_at?[{type:'text',text:`時間：${displayTime(item.due_at)}（台灣）`,wrap:true,size:'sm'},{type:'text',text:googleReady?'點確認即直接新增，提前 10 分鐘通知；刪除時可選擇是否一併移除日曆。':'日曆需另外按「儲存」，並確認通知設定；LINE 不會主動提醒，也不會同步日曆變更。',wrap:true,size:'xs',color:'#64748B'}]:[])]},footer:{type:'box',layout:'vertical',spacing:'sm',contents:buttons}}};
+ return {type:'flex',altText:`個人備忘 #${item.id} ${item.content.slice(0,60)}`,contents:{type:'bubble',size:'mega',body:{type:'box',layout:'vertical',spacing:'md',contents:[{type:'text',text:`#${item.id} ${item.kind==='note'?'備忘':item.status==='done'?'已完成':'待辦'}`,weight:'bold',size:'md',color:'#334155'},{type:'text',text:item.content,wrap:true,size:'md'},...(item.due_at?[{type:'text',text:`時間：${displayTime(item.due_at)}（台灣）`,wrap:true,size:'sm'},{type:'text',text:googleReady?'點確認即新增，預設提前10分鐘；不足10分鐘則於開始時通知。刪除時可選擇是否一併移除日曆。':'日曆需另外按「儲存」，並確認通知設定；LINE 不會主動提醒，也不會同步日曆變更。',wrap:true,size:'xs',color:'#64748B'}]:[])]},footer:{type:'box',layout:'vertical',spacing:'sm',contents:buttons}}};
 }
 export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},fetcher=fetch}){
  const googleReady=Boolean(env.GOOGLE_CLIENT_ID&&env.GOOGLE_CLIENT_SECRET&&env.GOOGLE_TOKEN_KEY);
- input=input.trim();
+ input=normalizeMemoCommand(input);
  if(input==='連結日曆')return linkCalendar(env,owner);
  if(input==='日曆狀態')return calendarStatus({...env,MEMO_DB:db},owner);
  if(/^加入日曆 \d+$/.test(input))return addCalendarEvent({...env,MEMO_DB:db},owner,Number(input.split(' ')[1]),fetcher);
@@ -32,7 +44,7 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
   await query(db,'INSERT INTO memo_items(owner_id,kind,content,created_at,updated_at,source_event) VALUES(?,?,?,?,?,?) ON CONFLICT(source_event) DO NOTHING',owner,kind,content,now.toISOString(),now.toISOString(),eventId).run();
   const item=await query(db,'SELECT * FROM memo_items WHERE owner_id=? AND source_event=?',owner,eventId).first();return itemCard(item,googleReady);
  }
- if(input.startsWith('提醒 ')){
+ if(isReminderInput(input)){
   const parsed=parseReminder(input,now);if(parsed.error)return text(parsed.error);
   await query(db,"INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder',?,?,?,?,?) ON CONFLICT(source_event) DO NOTHING",owner,parsed.content,parsed.dueAt,now.toISOString(),now.toISOString(),eventId).run();
   return itemCard(await query(db,'SELECT * FROM memo_items WHERE owner_id=? AND source_event=?',owner,eventId).first(),googleReady);

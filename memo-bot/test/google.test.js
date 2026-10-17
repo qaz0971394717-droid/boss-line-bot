@@ -77,3 +77,12 @@ test('concurrent add and delete operations for one item cannot interleave',async
  assert.equal(db.prepare('SELECT deleted_at FROM memo_items').get().deleted_at,null);
  }finally{db.close();}
 });
+
+test('near-term reminders notify at event time rather than at an already-past ten-minute offset',async()=>{
+ const {db,env}=fixture();try{
+ db.prepare('INSERT INTO google_connections VALUES(?,?,?,?)').run(owner,'memo@example.test',await seal({refreshToken:'refresh'},env),new Date().toISOString());
+ db.prepare("INSERT INTO memo_items(owner_id,kind,content,due_at,created_at,updated_at,source_event) VALUES(?,'reminder','三分鐘後提醒',?,?,?,'near')").run(owner,new Date(Date.now()+180000).toISOString(),new Date().toISOString(),new Date().toISOString());
+ const fetcher=async(url,options)=>{if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'access'});const data=JSON.parse(options.body);assert.equal(data.reminders.overrides[0].minutes,0);return Response.json({id:data.id});};
+ assert.match((await addCalendarEvent(env,owner,1,fetcher)).text,/於開始時間/);
+ }finally{db.close();}
+});

@@ -81,13 +81,14 @@ async function addCalendarEventUnlocked(env,owner,itemId,fetcher=fetch){
  if(mapping&&mapping.calendar_id!==connection.calendar_id)throw Error('Calendar mapping mismatch');
  await q(db,"INSERT INTO memo_calendar_events VALUES(?,?,?,'pending') ON CONFLICT(item_id) DO NOTHING",itemId,connection.calendar_id,eventId).run();
  const path='calendars/'+encodeURIComponent(connection.calendar_id)+'/events',ownerKey=await digest(owner);
- const event={id:eventId,summary:item.content,start:{dateTime:item.due_at,timeZone:'Asia/Taipei'},end:{dateTime:new Date(new Date(item.due_at).getTime()+1800000).toISOString(),timeZone:'Asia/Taipei'},reminders:{useDefault:false,overrides:[{method:'popup',minutes:10}]},extendedProperties:{private:{memoId:String(itemId),memoOwner:ownerKey}}};
+ const noticeMinutes=new Date(item.due_at).getTime()-Date.now()<=600000?0:10;
+ const event={id:eventId,summary:item.content,start:{dateTime:item.due_at,timeZone:'Asia/Taipei'},end:{dateTime:new Date(new Date(item.due_at).getTime()+1800000).toISOString(),timeZone:'Asia/Taipei'},reminders:{useDefault:false,overrides:[{method:'popup',minutes:noticeMinutes}]},extendedProperties:{private:{memoId:String(itemId),memoOwner:ownerKey}}};
  let accepted=false;
  if(mapping){const existing=await calendarApi(path+'/'+eventId,token.access_token,{},fetcher);if(existing.ok){const data=await existing.json();accepted=data.status!=='cancelled'&&data.extendedProperties?.private?.memoId===String(itemId)&&data.extendedProperties?.private?.memoOwner===ownerKey;if(!accepted)throw Error('Existing event mismatch');}else if(existing.status!==404)throw Error('Event lookup failed');}
  if(!accepted){const created=await calendarApi(path,token.access_token,{method:'POST',body:event},fetcher);if(created.ok)accepted=true;else if(created.status===409){const existing=await calendarApi(path+'/'+eventId,token.access_token,{},fetcher);if(existing.ok){const data=await existing.json();accepted=data.status!=='cancelled'&&data.extendedProperties?.private?.memoId===String(itemId)&&data.extendedProperties?.private?.memoOwner===ownerKey;}}}
  if(!accepted)throw Error('Calendar event not confirmed');
  await q(db,"UPDATE memo_calendar_events SET state='added' WHERE item_id=? AND event_id=?",itemId,eventId).run();
- return message(`✅ #${itemId} 已加入 Google 日曆，提前 10 分鐘通知。\n請確認 Android 允許 Google 日曆通知。`);
+ return message(`✅ #${itemId} 已加入 Google 日曆，${noticeMinutes?'提前 10 分鐘':'於開始時間'}通知。\n請確認 Android 允許 Google 日曆通知。`);
  }catch(error){console.error('Google calendar event failed:',error.name);return message('尚未確認日曆新增成功，請稍後再點一次。系統會使用相同事件編號，避免重複新增。');}
 }
 
