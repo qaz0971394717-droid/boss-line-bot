@@ -1,0 +1,35 @@
+name: D1 capacity monitor
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/d1-capacity-monitor.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [production, staging]
+    defaults:
+      run:
+        working-directory: cloudflare-migration
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/line-boss-handoff
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Monitor storage and account daily quota
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/maintain-d1.mjs monitor ${{ matrix.target }}
