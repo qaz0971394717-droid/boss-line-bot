@@ -15,7 +15,7 @@ test('undo quick reply is bound to its operation and stale buttons cannot undo a
 
 test('recent reports by another actor require scoped confirmation; own reports proceed',async()=>{const {db,env,cmd}=fixture();env.ENABLE_OVERWRITE_GUARD='true';db.exec(OVERWRITE_SCHEMA);try{
  await cmd('K 大象H');const initial=db.prepare('SELECT kill_time FROM boss_kills').get().kill_time;
- const prompt=await cmd('K 大象H 1022','b');assert.match(prompt.text,/剛有人/);assert.equal(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,initial);
+ const prompt=await cmd('K 大象H 1022','b');assert.match(prompt.text,/是否保存新紀錄/);assert.equal(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,initial);
  const token=prompt.quickReply.items[0].action.data.split(':')[2];assert.match((await cmd('確認覆蓋 '+token,'c')).text,/不屬於/);
  assert.match((await cmd('確認覆蓋 '+token,'b')).text,/擊殺已記錄/);assert.notEqual(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,initial);
  assert.match((await cmd('確認覆蓋 '+token,'b')).text,/已使用/);assert.match((await cmd('K 大象H','b')).text,/擊殺已記錄/);
