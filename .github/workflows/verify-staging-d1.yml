@@ -1,0 +1,36 @@
+name: Verify live staging D1
+on:
+  push:
+    branches: [codex/d1-migration]
+    paths: ['.github/workflows/verify-staging-d1.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm deployed D1 binding and service
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          base="https://api.cloudflare.com/client/v4/accounts/"+os.environ["CF_ACCOUNT"]
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Authorization":"Bearer "+os.environ["CF_TOKEN"]})
+              with urllib.request.urlopen(req) as r: data=json.load(r)
+              assert data.get("success")
+              return data["result"]
+          databases=get("/d1/database")
+          target=next(x for x in databases if x["name"]=="hit2-boss-d1-staging-38984107626")
+          settings=get("/workers/scripts/hit2-boss-staging/settings")
+          binding=next(x for x in settings["bindings"] if x["type"]=="d1" and x["name"]=="BOSS_DB")
+          assert binding.get("id",binding.get("database_id"))==target["uuid"]
+          with urllib.request.urlopen("https://hit2-boss-staging.qaz0971394717.workers.dev") as r: health=json.load(r)
+          assert health["database_backend"]=="d1" and health["line_enabled"] and health["admin_enabled"] and not health["reminders_enabled"]
+          assert not any(x.get("name")=="MIGRATION_MODE" and x.get("text")=="true" for x in settings["bindings"])
+          print("STAGING_D1_DATABASE_ID="+target["uuid"])
+          print("PASS: live staging D1 binding and health verified; migration mode off.")
+          PY
