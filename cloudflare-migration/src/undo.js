@@ -12,7 +12,7 @@ export function undoEnvironment(env,command,chat,user){
  const parts=command.trim().split(/\s+/),kind=parts[0].toUpperCase();
  if(!['K','KBKILL','取消','修改出生'].includes(kind))return env;
  const op=crypto.randomUUID(),db=env.BOSS_DB;
- return {...env,BOSS_DB:{prepare(query){
+ return {...env,UNDO_OPERATION_ID:op,BOSS_DB:{prepare(query){
   const original=db.prepare(query);
   return {bind(...params){const bound=original.bind(...params);
    return {async all(){
@@ -32,13 +32,14 @@ export function undoEnvironment(env,command,chat,user){
   }};
  },batch:db.batch.bind(db)}};
 }
-export async function undoLast(env,chat,user){
+export async function undoLast(env,chat,user,expectedOperation){
  const msg=text=>({type:'text',text});
  if(env.ENABLE_UNDO!=='true')return msg('復原功能尚未啟用。');
  if(!user)return msg('無法確認操作身分，未復原。');
  const db=env.BOSS_DB,q=(s,...p)=>db.prepare(s).bind(...p);
  const rows=(await q('SELECT * FROM undo_entries WHERE chat_id=? AND user_id=? ORDER BY expires_at DESC',chat,user).all()).results;
  if(!rows.length)return msg('目前沒有可復原的操作。');
+ if(expectedOperation&&rows[0].operation_id!==expectedOperation)return msg('這是舊操作的按鈕，未復原目前的新操作。');
  const op=rows[0].operation_id,entries=rows.filter(r=>r.operation_id===op);
  if(entries.some(r=>r.expires_at<=Date.now())){await q('DELETE FROM undo_entries WHERE chat_id=? AND user_id=?',chat,user).run();return msg('已超過 10 分鐘，無法復原。');}
  const attempt=crypto.randomUUID();

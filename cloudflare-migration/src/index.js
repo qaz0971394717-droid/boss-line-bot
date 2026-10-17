@@ -85,13 +85,13 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         if (event.mode === "standby" || !event.replyToken) continue;
         const chatId = getChatId(event.source);
         if (chatId === "unknown") continue;
-        const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : null;
+        const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : event.type === "postback" && /^undo:[a-f0-9-]{36}$/.test(event.postback?.data||"") ? "復原" : null;
         if (!command) continue;
         if (expiredEvent(event)) continue;
         let stage = "event-validation";
         try {
           if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");
-          const context={userId:event.source?.userId,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
+          const context={undoOperationId:event.type==='postback'&&event.postback?.data?.startsWith('undo:')?event.postback.data.slice(5):undefined,userId:event.source?.userId,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
           stage = "command-filter";
           if(commandHandler===handleLineCommand&&!await shouldProcessCommand(command,chatId,env,context))continue;
           stage = "database-client";

@@ -29,6 +29,14 @@ export function parseRespawnTime(day,clock) {
 }
 
 export async function handleLineCommand(command, chatId, env, now=new Date(), context={}) {
+ const reply=await runLineCommand(command,chatId,env,now,context);
+ if(reply&&env.ENABLE_UNDO_BUTTON==='true'&&env.UNDO_OPERATION_ID&&context.userId){
+  const result=await env.BOSS_DB.prepare('SELECT id FROM undo_entries WHERE chat_id=? AND user_id=? AND operation_id=? LIMIT 1').bind(chatId,context.userId,env.UNDO_OPERATION_ID).all();
+  if(result.results?.length)reply.quickReply={items:[{type:'action',action:{type:'postback',label:'復原上一筆',data:'undo:'+env.UNDO_OPERATION_ID,displayText:'復原上一筆'}}]};
+ }
+ return reply;
+}
+async function runLineCommand(command, chatId, env, now=new Date(), context={}) {
   if(!hasDatabase(env)) return textMessage("❌ 測試資料庫尚未設定。");
   const sql=createSql(env);
   const input=command.trim(), upper=input.toUpperCase();
@@ -47,7 +55,7 @@ export async function handleLineCommand(command, chatId, env, now=new Date(), co
     if(new Date(pending[0].expires_at).getTime()<=now.getTime())return textMessage('確認已逾時，未清除。');
     clearing=true;
   }
-  if(input==='復原')return undoLast(env,chatId,context.userId);
+  if(input==='復原')return undoLast(env,chatId,context.userId,context.undoOperationId);
   if(env.ENABLE_UNDO==='true'&&input.startsWith('取消 ')&&input.trim().split(/\s+/).length>6)return textMessage('測試版一次最多取消 5 隻王，以確保可完整復原。');
   const adminReply=clearing?null:await processAdminCommand(input,chatId,env,sql,now);
   if(adminReply)return adminReply;
