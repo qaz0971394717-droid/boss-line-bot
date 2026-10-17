@@ -1,0 +1,28 @@
+import {OVERWRITE_SCHEMA} from '../src/overwrite-guard.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';
+import {UNDO_SCHEMA,undoEnvironment,undoLast} from '../src/undo.js';import {handleLineCommand} from '../src/line-commands.js';
+function fixture(){const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../d1/0001_core.sql',import.meta.url),'utf8'));db.exec(UNDO_SCHEMA.join(';')+';');db.exec("INSERT INTO boss_types VALUES('大象h','大象H',720);INSERT INTO boss_types VALUES('沼澤h','沼澤H',720)");const binding={prepare(sql){const make=params=>({async all(){return {success:true,results:db.prepare(sql).all(...params)};},async first(){return db.prepare(sql).get(...params);},async run(){db.prepare(sql).run(...params);return {success:true};},sql,params});return {...make([]),bind(...p){return make(p);}};},async batch(queries){db.exec('BEGIN');try{const results=[];for(const q of queries)results.push(await q.all());db.exec('COMMIT');return results;}catch(e){db.exec('ROLLBACK');throw e;}}};const env={DATABASE_BACKEND:'d1',ENABLE_UNDO:'true',ENABLE_UNDO_BUTTON:'true',ENABLE_EVENT_ORDER_GUARD:'true',BOSS_DB:binding};let clock=Date.now();const cmd=(s,user='a',chat='group')=>handleLineCommand(s,chat,undoEnvironment(env,s,chat,user),new Date(clock+=1000),{userId:user,eventTimestamp:clock});return {db,env,cmd};}
+test('undo new K removes only own group record and cannot repeat',async()=>{const {db,cmd}=fixture();try{await cmd('K 大象H');assert.match((await cmd('復原','b')).text,/沒有/);assert.match((await cmd('復原','a','other')).text,/沒有/);assert.match((await cmd('復原')).text,/已復原/);assert.equal(db.prepare('SELECT count(*) n FROM boss_kills').get().n,0);assert.match((await cmd('復原')).text,/沒有/);}finally{db.close();}});
+test('undo restores prior K, respawn edit and all rows in a cancellation',async()=>{const {db,cmd}=fixture();try{await cmd('K 大象H 1022');const old=db.prepare('SELECT kill_time FROM boss_kills').get().kill_time;await cmd('K 大象H 1122');await cmd('復原');assert.equal(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,old);await cmd('修改出生 大象H 2026-10-18 12:30:00');await cmd('復原');assert.equal(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,old);await cmd('K 沼澤H');await cmd('取消 大象H 沼澤H');assert.equal(db.prepare('SELECT count(*) n FROM boss_kills').get().n,0);assert.match((await cmd('復原')).text,/2 隻/);assert.equal(db.prepare('SELECT count(*) n FROM boss_kills').get().n,2);}finally{db.close();}});
+test('revision tombstones reject undo after another writer or clear, and expiry is enforced',async()=>{const {db,cmd}=fixture();try{await cmd('K 大象H');await cmd('K 大象H','b');assert.match((await cmd('復原')).text,/後續變更/);await cmd('取消 大象H','b');assert.match((await cmd('復原')).text,/後續變更/);await cmd('K 大象H');db.exec("UPDATE undo_entries SET expires_at=0");assert.match((await cmd('復原')).text,/10 分鐘/);await cmd('K 大象H');db.exec('DELETE FROM boss_kills');assert.match((await cmd('復原')).text,/後續變更/);}finally{db.close();}});
+
+test('undo quick reply is bound to its operation and stale buttons cannot undo a newer action',async()=>{const {db,env,cmd}=fixture();try{
+ const first=await cmd('K 大象H');const action=first.quickReply.items[0].action;assert.equal(action.type,'postback');assert.match(action.data,/^undo:/);
+ const oldOp=action.data.slice(5);await cmd('K 沼澤H');assert.match((await undoLast(env,'group','a',oldOp)).text,/舊操作/);assert.equal(db.prepare('SELECT count(*) n FROM boss_kills').get().n,2);
+ assert.match((await undoLast(env,'group','b',oldOp)).text,/沒有/);const current=db.prepare("SELECT operation_id FROM undo_entries WHERE user_id='a'").get().operation_id;
+ assert.match((await undoLast(env,'group','a',current)).text,/已復原/);assert.equal(db.prepare('SELECT boss_name FROM boss_kills').get().boss_name,'大象H');
+ }finally{db.close();}});
+
+test('recent reports by another actor require scoped confirmation; own reports proceed',async()=>{const {db,env,cmd}=fixture();env.ENABLE_OVERWRITE_GUARD='true';db.exec(OVERWRITE_SCHEMA);try{
+ await cmd('K 大象H');const initial=db.prepare('SELECT kill_time FROM boss_kills').get().kill_time;
+ const prompt=await cmd('K 大象H 1022','b');assert.match(prompt.text,/是否保存新紀錄/);assert.equal(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,initial);
+ const token=prompt.quickReply.items[0].action.data.split(':')[2];assert.match((await cmd('確認覆蓋 '+token,'c')).text,/不屬於/);
+ assert.match((await cmd('確認覆蓋 '+token,'b')).text,/擊殺已記錄/);assert.notEqual(db.prepare('SELECT kill_time FROM boss_kills').get().kill_time,initial);
+ assert.match((await cmd('確認覆蓋 '+token,'b')).text,/已使用/);assert.match((await cmd('K 大象H','b')).text,/擊殺已記錄/);
+ await cmd('取消 大象H','b');assert.match((await cmd('K 大象H','b')).text,/擊殺已記錄/);
+ }finally{db.close();}});
+test('confirmation cannot cover a later change and can be canceled or expire',async()=>{const {db,env,cmd}=fixture();env.ENABLE_OVERWRITE_GUARD='true';db.exec(OVERWRITE_SCHEMA);try{
+ await cmd('K 大象H');let p=await cmd('K 大象H','b');let token=p.quickReply.items[0].action.data.split(':')[2];await cmd('K 大象H','a');assert.match((await cmd('確認覆蓋 '+token,'b')).text,/又有更新/);
+ p=await cmd('K 大象H','b');token=p.quickReply.items[0].action.data.split(':')[2];assert.match((await cmd('取消覆蓋 '+token,'b')).text,/保留/);
+ p=await cmd('KBKILL 大象H','b');token=p.quickReply.items[0].action.data.split(':')[2];db.exec('UPDATE overwrite_confirmations SET expires_at=0');assert.match((await cmd('確認覆蓋 '+token,'b')).text,/逾時/);
+ }finally{db.close();}});

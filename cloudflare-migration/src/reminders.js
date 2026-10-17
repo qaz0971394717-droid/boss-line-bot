@@ -1,4 +1,5 @@
 // Isolated reminder transport. Staging never contacts the production reminder worker.
+import { fetchWithTimeout } from "./http.js";
 export function reminderPayload(chatId,bossName,respawnTime){
  return {chatId,bossKey:bossName.toLowerCase(),bossName,respawnAt:new Date(respawnTime).toISOString()};
 }
@@ -20,14 +21,14 @@ export async function stagingReminderRequest(env,path,payload,fetcher=fetch){
  const endpoint=new URL(target.toString());
  endpoint.pathname=target.pathname.replace(/\/$/,"")+path;
  try{
-  const res=await fetcher(endpoint.toString(),{
+  const res=await fetchWithTimeout(endpoint.toString(),{
    method:"POST",
    headers:{"Authorization":"Bearer "+env.STAGING_REMINDER_API_KEY,"Content-Type":"application/json"},
    body:JSON.stringify(payload)
-  });
+  },fetcher);
   return {sent:res.ok,status:res.status};
- }catch{
-  return {sent:false,reason:"network-error"};
+ }catch(error){
+  return {sent:false,reason:error?.name==="AbortError"?"timeout":"network-error"};
  }
 }
 

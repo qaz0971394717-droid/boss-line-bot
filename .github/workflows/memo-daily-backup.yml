@@ -1,0 +1,47 @@
+name: Private memo daily backup
+on:
+  schedule:
+    - cron: '30 21 * * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/memo-daily-backup.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: personal-memo-daily-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: memo-bot
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/line-boss-handoff
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: python3 -m pip install boto3
+      - name: Verified private backup and bounded retention
+        id: backup
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          MEMO_OWNER_LINE_USER_ID: ${{ secrets.MEMO_OWNER_LINE_USER_ID }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: python3 scripts/backup.py
+      - name: Publish GitHub alert if needed
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BACKUP_STATUS: ${{ steps.backup.outcome }}
+        run: node scripts/backup-status.mjs

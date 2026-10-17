@@ -1,0 +1,31 @@
+name: Diagnose LINE delivery state
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: [.github/workflows/diagnose-line-delivery.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect recent delivery states without message contents
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -i -e DATABASE_URL postgres:18 sh -c 'psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1' <<'SQL'
+          BEGIN READ ONLY;
+          SELECT created_at AT TIME ZONE 'Asia/Taipei' AS received_taipei,
+                 CASE WHEN delivered_at IS NOT NULL THEN 'delivered'
+                      WHEN reply IS NOT NULL THEN 'reply_saved_not_delivered'
+                      ELSE 'claimed_no_saved_reply' END AS state,
+                 round(extract(epoch FROM (delivered_at-created_at))::numeric,3) AS elapsed_seconds
+          FROM staging_line_events
+          WHERE created_at > now()-interval '2 hours'
+          ORDER BY created_at DESC LIMIT 40;
+          COMMIT;
+          SQL

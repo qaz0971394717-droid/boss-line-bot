@@ -1,3 +1,5 @@
+> Current deployment (2026-10-17): both staging and production use separate Cloudflare D1 databases. See [D1-MIGRATION.md](D1-MIGRATION.md) for current bindings, verified backup/restore and rollback constraints. Neon-specific instructions below describe the historical migration path.
+
 # Cloudflare Workers migration (isolated development)
 
 This branch is intentionally separate from production `main`. **Do not change LINE or Discord webhook URLs until parity tests pass.**
@@ -26,6 +28,11 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - [ ] Confirm backup, rollback URLs, and no duplicate reminders
 - [ ] Switch webhooks only after explicit approval
 
+## Isolated staging database initialization
+- Create a separate Neon staging branch using the schema-only option where available, so production rows are not copied. Never point the staging Worker at the production connection string.
+- In the Neon SQL Editor for that staging branch, run `sql/000_staging_core.sql`, `sql/001_staging_admin_challenges.sql`, and `sql/002_staging_line_events.sql` in that order. The core migration creates the three application tables and seeds the 62 default bosses.
+- Configure the staging branch connection string only as the Cloudflare Worker secret `STAGING_DATABASE_URL`; do not commit or paste it into chat.
+
 ## Staging administrator challenge and reminder setup (NOT production)
 - Run `sql/001_staging_admin_challenges.sql` against **an isolated Neon staging database only**. The table stores the pending command and expiry, never the plaintext admin password.
 - Keep `ENABLE_STAGING_ADMIN` unset or `false` until the staging table and `ADMIN_PASSWORD` Worker secret have been configured. Admin commands are safely rejected otherwise.
@@ -40,3 +47,11 @@ This branch is intentionally separate from production `main`. **Do not change LI
 - On staging reminder schedule/cancel failure, LINE commands show that the boss database write succeeded but the reminder was **not confirmed**. Administrator boss deletion warns for each affected chat whose cancellation failed.
 - Reminder transport rejects a staging endpoint equal to `REMINDER_WORKER_URL`, or reuse of `REMINDER_API_KEY` when these production settings are supplied. Do not grant staging Worker access to production reminder secrets.
 - Failed reminder requests are not yet retried or queued durably. Never treat this staging code as verified production reminder delivery.
+
+## Handoff verification (2026-10-16)
+- LINE reply and reminder HTTP requests abort after five seconds and reject redirects. They are not automatically retried: a timed-out request may already have changed remote state.
+- A LINE reply failure is reported as a failed batch, while later events in that batch are still processed. Malformed events and events without a known chat are skipped; invalid signed top-level payloads return HTTP 400.
+- The isolated database initialization section above lists all three staging SQL files in order. Durable `webhookEventId` claims prevent LINE redelivery from running a command again; stored replies may be retried, and acknowledged deliveries are skipped.
+- If a command crashes or its reply cannot be saved after a database mutation, its claim stays pending and redelivery fails closed. Reconcile the database/reminder state manually; do not automatically expire or delete pending claims. This favors preventing duplicate mutations over automatic recovery and does not provide atomic exactly-once delivery across PostgreSQL and external APIs.
+- A successful LINE reply whose delivery marker cannot be stored may still be retried with an already-used reply token. This requires operator reconciliation; automatic replay of the command is never attempted.
+- Staging has not been deployed or checked against a real isolated Neon database in this handoff. Cloudflare sign-in and isolated staging secrets are required to perform that verification.

@@ -1,6 +1,10 @@
 name: Cloudflare migration tests
 
 on:
+  pull_request:
+    paths:
+      - 'cloudflare-migration/**'
+      - '.github/workflows/cloudflare-migration-tests.yml'
   push:
     branches:
       - cloudflare-migration
@@ -24,6 +28,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npx wrangler deploy --dry-run --outdir ./dist
