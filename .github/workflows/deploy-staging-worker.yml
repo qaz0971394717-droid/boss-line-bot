@@ -2,7 +2,9 @@ name: Update staging LINE worker
 on:
   push:
     branches: [codex/d1-migration, codex/line-boss-handoff]
-    paths: [.github/workflows/deploy-staging-worker.yml]
+    paths:
+      - '.github/workflows/deploy-staging-worker.yml'
+      - 'cloudflare-migration/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: codex/d1-migration
+          ref: codex/line-boss-handoff
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
