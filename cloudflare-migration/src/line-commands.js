@@ -1,4 +1,4 @@
-import {createHelpFlex} from './help-flex.js';
+import {createHelpFlex,createHelpText} from './help-flex.js';
 // Staging-only LINE command engine. No production webhook is routed here yet.
 // All database writes require an isolated STAGING_DATABASE_URL.
 import { createSql, hasDatabase } from "./database.js";
@@ -48,6 +48,9 @@ export async function handleLineCommand(command, chatId, env, now=new Date(), co
   }
   const adminReply=clearing?null:await processAdminCommand(input,chatId,env,sql,now);
   if(adminReply)return adminReply;
+  if(input==="指令文字")return createHelpText('common',now);
+  if(input==="進階指令文字")return createHelpText('advanced',now);
+  if(input==="管理指令文字")return createHelpText('admin',now);
   if(input==="指令"||upper==="HELP")return createHelpFlex('common',now);
   if(input==="進階指令")return createHelpFlex('advanced',now);
   if(input==="管理指令")return createHelpFlex('admin',now);

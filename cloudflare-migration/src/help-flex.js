@@ -2,7 +2,7 @@
 const text=(value,extra={})=>({type:'text',text:value,wrap:true,size:'sm',color:'#334155',...extra});
 const row=(title,example,note)=>({type:'box',layout:'vertical',spacing:'xs',margin:'lg',contents:[{type:'box',layout:'horizontal',alignItems:'center',contents:[text(title,{weight:'bold',color:'#0F172A',flex:1}),{type:'button',height:'sm',style:'link',flex:0,action:{type:'clipboard',label:'複製',clipboardText:example}}]},text(example,{color:'#1D4ED8',weight:'bold'}),...(note?[text(note,{size:'xs',color:'#64748B'})]:[])]});
 const button=(label,command)=>({type:'button',height:'sm',style:'secondary',action:{type:'message',label,text:command}});
-function card(title,subtitle,rows,buttons){return {type:'flex',altText:title+'｜輸入「指令」查看操作範例',contents:{type:'bubble',size:'mega',header:{type:'box',layout:'vertical',backgroundColor:'#EAF2FF',spacing:'sm',contents:[text(title,{size:'lg',weight:'bold'}),text(subtitle+'；點「複製」後貼上修改再送出',{size:'xs',color:'#64748B'})]},body:{type:'box',layout:'vertical',paddingTop:'0px',contents:rows},footer:{type:'box',layout:'vertical',spacing:'sm',contents:buttons}}};}
+function card(title,subtitle,rows,buttons){return {type:'flex',altText:title+'｜輸入「指令」查看操作範例',contents:{type:'bubble',size:'mega',header:{type:'box',layout:'vertical',backgroundColor:'#EAF2FF',spacing:'sm',contents:[text(title,{size:'lg',weight:'bold'}),text(subtitle+'；點「複製」後貼上修改再送出',{size:'xs',color:'#64748B'})]},body:{type:'box',layout:'vertical',paddingTop:'0px',contents:rows},footer:{type:'box',layout:'vertical',spacing:'sm',contents:[...buttons,button('電腦版：可複製文字',title==='進階操作'?'進階指令文字':title==='王表管理'?'管理指令文字':'指令文字')]}}};}
 export function createHelpFlex(section='common',now=new Date()){
  const day=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
  if(section==='advanced')return card('進階操作','範例中的王名、日期與時間請自行替換',[
@@ -26,4 +26,15 @@ export function createHelpFlex(section='common',now=new Date()){
  row('查看目前紀錄','KB','也可以直接點下面的「查看 KB」'),
  row('取消一隻王的紀錄','取消 大象H','多隻範例：取消 大象H 沼澤H')
  ],[button('查看 KB','KB'),button('查看全部王名','王列表'),button('日期補登・模式・清除','進階指令'),button('管理王表','管理指令')]);
+}
+
+export function createHelpText(section='common',now=new Date()){
+ const bubble=createHelpFlex(section,now).contents;
+ const lines=[bubble.header.contents[0].text,'範例可選取複製；請修改王名、時間後再送出。',''];
+ for(const row of bubble.body.contents){
+  if(row.type==='text'){lines.push(row.text);continue;}
+  lines.push(row.contents[0].contents[0].text,row.contents[1].text,...row.contents.slice(2).map(x=>x.text.replace('也可以直接點下面的「查看 KB」','輸入 KB 即可查詢')),'');
+ }
+ lines.push('其他說明：指令文字｜進階指令文字｜管理指令文字');
+ return {type:'text',text:lines.join('\n')};
 }
