@@ -1,0 +1,56 @@
+name: Assess D1 usage
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/assess-d1-usage.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read sanitized usage statistics
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.error,datetime
+          account=os.environ["CF_ACCOUNT"]
+          headers={"Authorization":"Bearer "+os.environ["CF_TOKEN"],"Content-Type":"application/json"}
+          def request(url,body=None):
+              req=urllib.request.Request(url,data=json.dumps(body).encode() if body else None,headers=headers)
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as response: return json.load(response)
+              except urllib.error.HTTPError as error:
+                  return {"http":error.code,"errors":[{"code":error.code}]}
+          root="https://api.cloudflare.com/client/v4/accounts/"+account+"/d1/database/"
+          targets=[("production","db692969-0b74-4dc5-952a-604847e15628"),("staging","dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5")]
+          for label,id in targets:
+              info=request(root+id)
+              assert info.get("success")
+              result={"database":label,"file_size_bytes":info["result"].get("file_size")}
+              def query(sql,params=[]):
+                  data=request(root+id+"/query",{"sql":sql,"params":params})
+                  assert data.get("success")
+                  return data["result"][0]
+              result["events"]=query("SELECT count(*) AS total,sum(CASE WHEN datetime(created_at)>=datetime('now','-24 hours') THEN 1 ELSE 0 END) AS last_24h,sum(CASE WHEN datetime(created_at)>=datetime('now','start of day') THEN 1 ELSE 0 END) AS utc_today,sum(CASE WHEN delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered FROM staging_line_events")["results"][0]
+              groups=query("SELECT DISTINCT chat_id FROM boss_kills")["results"]
+              samples=[]
+              for group in groups:
+                  q=query("SELECT boss_name,respawn_time FROM boss_kills WHERE chat_id=? ORDER BY respawn_time ASC",[group["chat_id"]])
+                  samples.append({"returned":len(q["results"]),"rows_read":q.get("meta",{}).get("rows_read"),"rows_written":q.get("meta",{}).get("rows_written")})
+              result["kb_samples"]=samples
+              print(json.dumps(result))
+          today=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+          query='query($accountTag: string!, $start: Date, $end: Date) { viewer { accounts(filter:{accountTag:$accountTag}) { d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end}) { sum { readQueries writeQueries rowsRead rowsWritten } } } } }'
+          analytics=request("https://api.cloudflare.com/client/v4/graphql",{"query":query,"variables":{"accountTag":account,"start":today,"end":today}})
+          if analytics.get("errors"):
+              print(json.dumps({"account_analytics_available":False,"error_codes":[x.get("code") for x in analytics["errors"]]}))
+          else:
+              totals={}
+              for row in analytics["data"]["viewer"]["accounts"][0]["d1AnalyticsAdaptiveGroups"]:
+                  for key,value in row["sum"].items(): totals[key]=totals.get(key,0)+(value or 0)
+              print(json.dumps({"account_utc_date":today,"account_daily_totals":totals}))
+          PY
