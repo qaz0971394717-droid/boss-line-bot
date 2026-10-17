@@ -1,5 +1,5 @@
 {
-  "sha": "48ea008a6a0eed34b3495a0c56e20a8a7a131d3d",
-  "staging_run": 38989056722,
-  "acceptance": "User verified KB clear confirmation and explicit-date K in test LINE group on 2026-10-17 Asia/Taipei"
+  "sha": "faaf7529e95e32d0c93b6d267e903fbde600a168",
+  "acceptance": "User tested undo in staging and explicitly approved production on 2026-10-17 Asia/Taipei",
+  "tests": 71
 }
