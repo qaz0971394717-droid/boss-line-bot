@@ -1,9 +1,6 @@
-name: Neon to R2 daily backup
+name: Legacy Neon backup (manual only)
 
 on:
-  schedule:
-    # 05:00 Asia/Taipei (21:00 UTC, previous calendar day)
-    - cron: "0 21 * * *"
   workflow_dispatch:
 
 permissions:
