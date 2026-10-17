@@ -68,3 +68,13 @@ test('production adapter does not forward the staging birthday switch',async()=>
  assert.equal(received.ENABLE_BIRTHDAY_SURPRISE,undefined);
  assert.ok(!JSON.stringify(addBirthdayButton(createKbFlex([]),received,BIRTHDAY_CHAT_ID)).includes(BIRTHDAY_COMMAND));
 });
+
+test('staging private chat can preview birthday KB without joining a group',async()=>{
+ const chat='U'+'a'.repeat(32);
+ const preview=addBirthdayButton(createKbFlex([]),enabled,chat);
+ assert.equal(preview.quickReply.items[0].action.label,BIRTHDAY_COMMAND);
+ assert.match((await handleLineCommand(BIRTHDAY_COMMAND,chat,enabled)).text,/生日快樂/);
+ assert.equal(await shouldProcessCommand(BIRTHDAY_COMMAND,chat,enabled,{}),true);
+ assert.equal(addBirthdayButton(createKbFlex([]),{...enabled,PRODUCTION_MODE:'true'},chat).quickReply,undefined);
+ assert.equal(addBirthdayButton(createKbFlex([]),enabled,'Canother-group').quickReply,undefined);
+});

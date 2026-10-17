@@ -4,7 +4,8 @@ export const BIRTHDAY_CHAT_ID = 'Cb6a98e7cead691d3f43cf6a743f34191';
 
 export const birthdayEnabled = (env, chatId) =>
   env.STAGING_MODE === 'true' && env.PRODUCTION_MODE !== 'true' &&
-  env.ENABLE_BIRTHDAY_SURPRISE === 'true' && chatId === BIRTHDAY_CHAT_ID;
+  env.ENABLE_BIRTHDAY_SURPRISE === 'true' &&
+  (chatId === BIRTHDAY_CHAT_ID || /^U[a-f0-9]{32}$/i.test(chatId));
 
 export const birthdayGreeting = () => ({type:'text',text:"🎂 多多綠大姊，生日快樂！🎉\n\n⚔️ 打王出寶，好運滿滿！\n🎁 天天都有橘箱\n🪶 橘箱一開，羽毛就來！"});
 
