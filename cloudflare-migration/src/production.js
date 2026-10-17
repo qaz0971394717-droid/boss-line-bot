@@ -1,22 +1,27 @@
+import { migrationGate } from './migration.js';
 import { createWorker } from './index.js';
 
 // Reuse the verified command engine through an explicit configuration adapter.
 // Never fall back to staging credentials or expose Discord/reminder routes.
-export function createProductionWorker({ worker = createWorker() } = {}) {
+export function createProductionWorker({ worker = createWorker(), migrationHandler = migrationGate } = {}) {
   return {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       const enabled = env.PRODUCTION_MODE === 'true' && env.ENABLE_LINE === 'true';
+      const maintenance = await migrationHandler(request, {MIGRATION_MODE: env.MIGRATION_MODE, MIGRATION_KEY: env.MIGRATION_KEY, STAGING_DATABASE_URL: env.DATABASE_URL});
+      if (maintenance) return maintenance;
       if (url.pathname === '/' && request.method === 'GET') {
-        return Response.json({ service: 'hit2-boss-production', mode: 'production', status: 'ok',
+        return Response.json({ service: 'hit2-boss-production', mode: 'production', database_backend: env.DATABASE_BACKEND === 'd1' ? 'd1' : 'neon', status: 'ok',
           line_enabled: enabled, admin_enabled: enabled && env.ENABLE_ADMIN === 'true', reminders_enabled: false });
       }
       if (url.pathname !== '/callback' || request.method !== 'POST') return new Response('Not Found', { status: 404 });
-      if (!enabled || !env.DATABASE_URL || !env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
+      if (!enabled || !(env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB?.prepare : env.DATABASE_URL) || !env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
         return Response.json({ error: 'Production LINE configuration incomplete' }, { status: 503 });
       }
       return worker.fetch(request, {
         STAGING_MODE: 'true',
+        DATABASE_BACKEND: env.DATABASE_BACKEND,
+        BOSS_DB: env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB : undefined,
         ENABLE_STAGING_LINE: 'true',
         STAGING_DATABASE_URL: env.DATABASE_URL,
         LINE_CHANNEL_SECRET: env.LINE_CHANNEL_SECRET,

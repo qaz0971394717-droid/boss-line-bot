@@ -1,8 +1,12 @@
 name = "hit2-boss-production"
 main = "src/production.js"
 compatibility_date = "2026-10-01"
-
 [vars]
 PRODUCTION_MODE = "true"
 ENABLE_LINE = "true"
 ENABLE_ADMIN = "true"
+DATABASE_BACKEND = "d1"
+[[d1_databases]]
+binding = "BOSS_DB"
+database_name = "hit2-boss-d1-production-38984686581"
+database_id = "db692969-0b74-4dc5-952a-604847e15628"

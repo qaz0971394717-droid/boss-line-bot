@@ -36,3 +36,24 @@ test('production forwards the original execution context to preserve webhook lif
   await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),credentials,ctx);
   assert.equal(received,ctx);
 });
+
+test('production D1 requires its explicit binding and does not use staging fallback',async()=>{
+ let received;
+ const worker=createProductionWorker({worker:{fetch(_request,env){received=env;return new Response('ok');}}});
+ const env={...credentials,DATABASE_BACKEND:'d1',STAGING_DATABASE_URL:'wrong',BOSS_DB:{prepare(){}}};
+ delete env.DATABASE_URL;
+ assert.equal((await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),env)).status,200);
+ assert.equal(received.BOSS_DB,env.BOSS_DB);
+ assert.equal(received.DATABASE_BACKEND,'d1');
+ delete env.BOSS_DB;
+ assert.equal((await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),env)).status,503);
+});
+
+test('production maintenance only receives original production source and stops callback',async()=>{
+ let invoked=false;
+ const worker=createProductionWorker({worker:{fetch(){throw Error('must not process commands');}},migrationHandler:async(request,env)=>{
+  invoked=true;assert.equal(env.STAGING_DATABASE_URL,'production-only');assert.equal(env.MIGRATION_KEY,'private');return new Response('maintenance',{status:503});
+ }});
+ const result=await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),{...credentials,MIGRATION_MODE:'true',MIGRATION_KEY:'private',STAGING_DATABASE_URL:'wrong'});
+ assert.equal(invoked,true);assert.equal(result.status,503);
+});

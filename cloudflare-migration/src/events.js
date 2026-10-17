@@ -1,9 +1,9 @@
-import { neon } from '@neondatabase/serverless';
+import { createSql } from './database.js';
 
 // A pending claim is deliberately never stolen or expired automatically.
 // A crashed command may already have committed its write or sent a reminder.
 export function createEventStore(env) {
- const sql = neon(env.STAGING_DATABASE_URL);
+ const sql = createSql(env);
  return {
   async claim(id) {
    const inserted = await sql`INSERT INTO staging_line_events(event_id) VALUES(${id}) ON CONFLICT(event_id) DO NOTHING RETURNING event_id`;

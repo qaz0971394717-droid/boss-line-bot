@@ -1,0 +1,36 @@
+name: Verify live staging D1
+on:
+  push:
+    branches: [codex/d1-migration]
+    paths: ['.github/workflows/verify-staging-d1.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm deployed D1 binding and service
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          base="https://api.cloudflare.com/client/v4/accounts/"+os.environ["CF_ACCOUNT"]
+          def get(path):
+              req=urllib.request.Request(base+path,headers={"Authorization":"Bearer "+os.environ["CF_TOKEN"]})
+              with urllib.request.urlopen(req) as r: data=json.load(r)
+              assert data.get("success")
+              return data["result"]
+          databases=get("/d1/database")
+          target=next(x for x in databases if x["name"]=="hit2-boss-d1-staging-38984107626")
+          settings=get("/workers/scripts/hit2-boss-staging/settings")
+          binding=next(x for x in settings["bindings"] if x["type"]=="d1" and x["name"]=="BOSS_DB")
+          assert binding.get("id",binding.get("database_id"))==target["uuid"]
+          variables={x["name"]:x.get("text") for x in settings["bindings"] if x["type"]=="plain_text"}
+          assert variables["DATABASE_BACKEND"]=="d1" and variables["ENABLE_STAGING_LINE"]=="true" and variables["ENABLE_STAGING_REMINDERS"]=="false"
+          assert not any(x.get("name")=="MIGRATION_MODE" and x.get("text")=="true" for x in settings["bindings"])
+          print("STAGING_D1_DATABASE_ID="+target["uuid"])
+          print("PASS: live staging D1 binding and configuration verified; migration mode off.")
+          PY

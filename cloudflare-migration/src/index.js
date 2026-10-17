@@ -1,4 +1,5 @@
-import { neon } from "@neondatabase/serverless";
+import { migrationGate } from "./migration.js";
+import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
 import { fetchWithTimeout } from "./http.js";
 import { createEventStore } from "./events.js";
@@ -56,12 +57,14 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
  return {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
+    const maintenance = await migrationGate(request, env);
+    if (maintenance) return maintenance;
+    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", database_backend: env.DATABASE_BACKEND === "d1" ? "d1" : "neon", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
     if (url.pathname === "/callback" && request.method === "POST") {
       const body = await request.text();
       if (!await verifyLineSignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET)) return new Response("Invalid signature", { status: 401 });
       // Explicitly opt-in to staging processing; never route production LINE here.
-      if (env.STAGING_MODE !== "true" || !env.STAGING_DATABASE_URL || !env.LINE_CHANNEL_ACCESS_TOKEN || env.ENABLE_STAGING_LINE !== "true") {
+      if (env.STAGING_MODE !== "true" || !hasDatabase(env) || !env.LINE_CHANNEL_ACCESS_TOKEN || env.ENABLE_STAGING_LINE !== "true") {
         return json({ error: "Staging LINE disabled. Do not switch production webhook." }, 503);
       }
       let payload;
@@ -125,9 +128,9 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
       if (!payload || typeof payload !== "object") return json({ error: "Invalid interaction payload" }, 400);
       if (payload.type === 1) return json({ type: 1 });
       if (payload.type === 2 && payload.data?.name?.toLowerCase() === "kb") {
-        if (!env.DISCORD_KB_LINE_CHAT_ID || !env.STAGING_DATABASE_URL) return json({ type: 4, data: { content: "❌ Discord 資料庫設定尚未完成。", flags: 64 } });
+        if (!env.DISCORD_KB_LINE_CHAT_ID || !hasDatabase(env)) return json({ type: 4, data: { content: "❌ Discord 資料庫設定尚未完成。", flags: 64 } });
         try {
-          const sql = neon(env.STAGING_DATABASE_URL);
+          const sql = createSql(env);
           const rows = await sql`SELECT boss_name, respawn_time FROM boss_kills WHERE chat_id = ${env.DISCORD_KB_LINE_CHAT_ID} ORDER BY respawn_time ASC`;
           return json({ type: 4, data: { content: formatDiscordKb(rows), allowed_mentions: { parse: [] } } });
         } catch (e) {
