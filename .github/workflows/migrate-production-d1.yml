@@ -1,0 +1,36 @@
+name: Migrate production to D1
+on:
+  push:
+    branches: [codex/d1-migration]
+    paths: ['.github/workflows/migrate-production-d1.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hit2-boss-production-deploy
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare-migration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm test
+      - run: npx wrangler deploy --config wrangler.production.toml --dry-run
+      - run: python3 -m pip install boto3
+      - name: Migrate original production data with R2 restore validation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: node scripts/migrate-production-d1.mjs
