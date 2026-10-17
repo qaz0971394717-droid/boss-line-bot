@@ -1,5 +1,5 @@
 import {getNoticeMinutes,noticeLabel} from './notice.js';
-import {linkCalendar,calendarStatus,addCalendarEvent,deleteCalendarAndMemo,setNoticeMinutes} from './google.js';
+import {linkCalendar,calendarStatus,addCalendarEvent,deleteCalendarAndMemo,setNoticeMinutes,calendarItems,previewCalendarClear,cancelCalendarClear,confirmCalendarClear} from './google.js';
 import {parseReminder,taipeiDay,displayTime,calendarUrl,isReminderInput} from './calendar.js';
 const text=value=>({type:'text',text:value});
 const action=(label,value)=>({type:'action',action:{type:'message',label,text:value}});
@@ -16,10 +16,10 @@ export function normalizeMemoCommand(raw){
  return input;
 }
 
-export const knownCommand=input=>isReminderInput(input)||/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|提醒設定\s+\d+|自訂提醒\s+\d+|提前提醒\s+\d+\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(normalizeMemoCommand(input));
+export const knownCommand=input=>isReminderInput(input)||/^(指令|HELP|測試|日曆行程(?:\s+\d+)?|已結束行程(?:\s+\d+)?|清除日曆|清除已結束行程|刪除日曆\s+\d+|取消日曆清除|確認日曆清除\s+[a-f0-9]{32}|連結日曆|日曆狀態|加入日曆\s+\d+|提醒設定\s+\d+|自訂提醒\s+\d+|提前提醒\s+\d+\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(normalizeMemoCommand(input));
 const help=(googleReady=false)=>({
  ...text('📒 我的備忘\n\n📝 記事情\n備忘 買牛奶\n\n🔔 設提醒\n明天下午3點提醒我拿包裹\n\n📋 看待辦\n今天待辦\n\n🔎 找筆記\n查備忘 牛奶\n\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
- quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表')]}
+ quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表'),action('日曆行程','日曆行程')]}
 });
 export function itemCard(item,googleReady=false){
  const button=(label,command)=>({type:'button',height:'sm',style:'secondary',action:{type:'message',label,text:command}});
@@ -37,6 +37,14 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
  if(input==='連結日曆')return linkCalendar(env,owner);
  if(input==='日曆狀態')return calendarStatus({...env,MEMO_DB:db},owner);
  if(/^加入日曆 \d+$/.test(input))return addCalendarEvent({...env,MEMO_DB:db},owner,Number(input.split(' ')[1]),fetcher);
+ const calendarList=input.match(/^(日曆行程|已結束行程)(?:\s+(\d+))?$/);
+ if(calendarList)return calendarItems({...env,MEMO_DB:db},owner,calendarList[1]==='已結束行程',Number(calendarList[2]||1),fetcher);
+ if(input==='清除日曆'||input==='清除已結束行程')return previewCalendarClear({...env,MEMO_DB:db},owner,input==='清除日曆'?'all':'ended',fetcher);
+ const removeCalendar=input.match(/^刪除日曆\s+(\d+)$/);
+ if(removeCalendar)return previewCalendarClear({...env,MEMO_DB:db},owner,Number(removeCalendar[1]),fetcher);
+ if(input==='取消日曆清除')return cancelCalendarClear({...env,MEMO_DB:db},owner);
+ const confirmClear=input.match(/^確認日曆清除\s+([a-f0-9]{32})$/);
+ if(confirmClear)return confirmCalendarClear({...env,MEMO_DB:db},owner,confirmClear[1],fetcher);
  const noticeCommand=input.match(/^(提醒設定|自訂提醒|提前提醒)\s+(\d+)(?:\s+(\d+))?$/);
  if(noticeCommand){
   const [,verb,rawId,rawMinutes]=noticeCommand,id=Number(rawId);

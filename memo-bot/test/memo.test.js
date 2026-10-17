@@ -48,12 +48,12 @@ test('reminder cards are concise and deletion offers both choices without immedi
  }finally{db.close();}
 });
 
-test('help shows concise everyday examples and three read-only shortcuts',async()=>{
+test('help shows concise everyday examples and read-only calendar shortcut',async()=>{
  const {db,binding}=fixture();try{
  const help=await runCommand('指令',{db:binding,owner,eventId:'help',env:{GOOGLE_CLIENT_ID:'configured',GOOGLE_CLIENT_SECRET:'configured',GOOGLE_TOKEN_KEY:'configured'}});
  assert.match(help.text,/備忘 買牛奶/);assert.match(help.text,/明天下午3點提醒我拿包裹/);
  assert.ok(!/DL380|P11782|完成 編號|刪除 編號|Google 授權|2026-10-20/.test(help.text));
- assert.ok(help.text.length<200);assert.deepEqual(help.quickReply.items.map(x=>x.action.text),['今天待辦','待辦','備忘列表']);
+ assert.ok(help.text.length<200);assert.deepEqual(help.quickReply.items.map(x=>x.action.text),['今天待辦','待辦','備忘列表','日曆行程']);
  assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,0);
  }finally{db.close();}
 });
@@ -133,5 +133,17 @@ test('signed notice postback applies the selected lead without creating another 
  assert.equal((await worker.fetch(await signed({events:[e]}),env)).status,200);
  assert.equal(db.prepare('SELECT notice_minutes FROM memo_items').get().notice_minutes,60);
  assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,1);assert.equal(calls,1);
+ }finally{db.close();}
+});
+
+test('calendar management commands and confirmation postbacks are routed through the private webhook',async()=>{
+ const {db,binding}=fixture();db.exec(GOOGLE_SCHEMA);
+ try{
+ for(const command of ['日曆行程','日曆行程 2','已結束行程','清除日曆','清除已結束行程','刪除日曆 1','取消日曆清除','確認日曆清除 '+'a'.repeat(32)])assert.ok(knownCommand(command),command);
+ const token='a'.repeat(32);db.prepare('INSERT INTO memo_calendar_confirmations VALUES(?,?,?,?)').run(token,owner,'{}',Date.now()-1);
+ const env={MEMO_DB:binding,LINE_CHANNEL_SECRET:'test-secret',LINE_CHANNEL_ACCESS_TOKEN:'token',OWNER_LINE_USER_ID:owner};
+ let reply;const worker=createWorker({fetcher:async(url,options)=>{reply=JSON.parse(options.body).messages[0];return Response.json({});}});
+ const e={...event('clear-confirm'),type:'postback',postback:{data:'memo:calclear:'+token}};delete e.message;
+ assert.equal((await worker.fetch(await signed({events:[e]}),env)).status,200);assert.match(reply.text,/逾時/);
  }finally{db.close();}
 });
