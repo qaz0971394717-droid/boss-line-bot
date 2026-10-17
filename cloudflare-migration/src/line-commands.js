@@ -1,3 +1,4 @@
+import {undoLast} from './undo.js';
 import {createHelpFlex,createHelpText} from './help-flex.js';
 // Staging-only LINE command engine. No production webhook is routed here yet.
 // All database writes require an isolated STAGING_DATABASE_URL.
@@ -46,6 +47,8 @@ export async function handleLineCommand(command, chatId, env, now=new Date(), co
     if(new Date(pending[0].expires_at).getTime()<=now.getTime())return textMessage('確認已逾時，未清除。');
     clearing=true;
   }
+  if(input==='復原')return undoLast(env,chatId,context.userId);
+  if(env.ENABLE_UNDO==='true'&&input.startsWith('取消 ')&&input.trim().split(/\s+/).length>6)return textMessage('測試版一次最多取消 5 隻王，以確保可完整復原。');
   const adminReply=clearing?null:await processAdminCommand(input,chatId,env,sql,now);
   if(adminReply)return adminReply;
   if(input==="指令文字")return createHelpText('common',now);

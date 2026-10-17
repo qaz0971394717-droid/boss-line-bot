@@ -1,3 +1,4 @@
+import {undoEnvironment} from './undo.js';
 import {opsRoute,bindAlerts} from './ops-alerts.js';
 import { shouldProcessCommand } from "./command-filter.js";
 import { expiredEvent } from "./retention-policy.js";
@@ -100,7 +101,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           if (claim.state === "done") { outcomes.push("ok"); continue; }
           if (claim.state === "pending") throw new Error("Event requires reconciliation");
           stage = "command";
-          const reply = claim.state === "ready" ? claim.reply : (await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, env, new Date(context.eventTimestamp), context));
+          const reply = claim.state === "ready" ? claim.reply : (await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
           if(!reply){await eventStore.delivered(event.webhookEventId);outcomes.push('ok');continue;}
