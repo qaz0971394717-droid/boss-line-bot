@@ -2,6 +2,7 @@ name = "hit2-boss-production"
 main = "src/production.js"
 compatibility_date = "2026-10-01"
 [vars]
+ENABLE_OVERWRITE_GUARD = "true"
 ENABLE_UNDO_BUTTON = "true"
 ENABLE_UNDO = "true"
 PRODUCTION_MODE = "true"
