@@ -24,11 +24,14 @@ export async function opsRoute(request,env,fetcher=fetch){
  if(!destination)return new Response('Destination not bound',{status:409});
  const retryKey=typeof p.retryKey==='string'&&/^[0-9a-f-]{36}$/.test(p.retryKey)?p.retryKey:null;
  if(!retryKey)return new Response('Invalid retry key',{status:400});
- const now=Date.now();
- const claim=await env.BOSS_DB.prepare("INSERT INTO ops_deliveries(id,status,updated_at) VALUES(?,'pending',?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE ops_deliveries.status!='sent' AND ops_deliveries.updated_at<? RETURNING id").bind(retryKey,now,now-60000).all();
- if(!claim.results.length){const old=await env.BOSS_DB.prepare('SELECT status FROM ops_deliveries WHERE id=?').bind(retryKey).first();return new Response(old?.status==='sent'?'Sent':'Pending',{status:old?.status==='sent'?200:503});}
  const text=p.kind==='recovery'?`✅ ${p.target==='production'?'正式版':'測試版'}資料庫警示已解除。`:`⚠️ ${p.target==='production'?'正式版':'測試版'}：${String(p.message||'維護檢查失敗').slice(0,220)}\n請查看 GitHub Actions。`;
- const r=await fetcher('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json','X-Line-Retry-Key':retryKey},body:JSON.stringify({to:destination.chat_id,messages:[{type:'text',text}]}),signal:AbortSignal.timeout(15000)});
+ const previous=await env.BOSS_DB.prepare('SELECT status,created_at FROM ops_deliveries WHERE id=?').bind(retryKey).first();
+ if(previous?.status!=='sent'&&previous&&Date.now()-previous.created_at>23*3600000)return new Response('Manual reconciliation required',{status:503});
+ const now=Date.now();
+ const claim=await env.BOSS_DB.prepare("INSERT INTO ops_deliveries(id,status,updated_at,created_at,message) VALUES(?,'pending',?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at WHERE ops_deliveries.status!='sent' AND ops_deliveries.updated_at<? RETURNING id").bind(retryKey,now,now,text,now-60000).all();
+ if(!claim.results.length){const old=await env.BOSS_DB.prepare('SELECT status FROM ops_deliveries WHERE id=?').bind(retryKey).first();return new Response(old?.status==='sent'?'Sent':'Pending',{status:old?.status==='sent'?200:503});}
+ const stored=await env.BOSS_DB.prepare('SELECT message FROM ops_deliveries WHERE id=?').bind(retryKey).first();
+ const r=await fetcher('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,'Content-Type':'application/json','X-Line-Retry-Key':retryKey},body:JSON.stringify({to:destination.chat_id,messages:[{type:'text',text:stored.message}]}),signal:AbortSignal.timeout(15000)});
  if(r.ok||r.status===409)await env.BOSS_DB.prepare("UPDATE ops_deliveries SET status='sent' WHERE id=?").bind(retryKey).run();
  return new Response(r.ok||r.status===409?'Sent':'LINE push failed',{status:r.ok||r.status===409?200:502});
 }
