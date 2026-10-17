@@ -36,6 +36,7 @@ jobs:
                   assert data.get("success")
                   return data["result"][0]
               result["events"]=query("SELECT count(*) AS total,sum(CASE WHEN datetime(created_at)>=datetime('now','-24 hours') THEN 1 ELSE 0 END) AS last_24h,sum(CASE WHEN datetime(created_at)>=datetime('now','start of day') THEN 1 ELSE 0 END) AS utc_today,sum(CASE WHEN delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered FROM staging_line_events")["results"][0]
+              result["reply_storage"]=query("SELECT count(*) AS records,sum(length(CAST(reply AS BLOB))) AS total_reply_bytes,avg(length(CAST(reply AS BLOB))) AS avg_reply_bytes,max(length(CAST(reply AS BLOB))) AS max_reply_bytes,sum(CASE WHEN datetime(created_at)>=datetime(\'now\',\'start of day\') AND delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered_utc_today FROM staging_line_events")["results"][0]
               groups=query("SELECT DISTINCT chat_id FROM boss_kills")["results"]
               samples=[]
               for group in groups:
