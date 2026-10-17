@@ -1,0 +1,40 @@
+name: Deploy private personal memo bot
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['memo-bot/**', '.github/workflows/deploy-memo-bot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hongzhe-personal-memo-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: memo-bot
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MEMO_LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.MEMO_LINE_CHANNEL_ACCESS_TOKEN }}
+      MEMO_LINE_CHANNEL_SECRET: ${{ secrets.MEMO_LINE_CHANNEL_SECRET }}
+      MEMO_OWNER_LINE_USER_ID: ${{ secrets.MEMO_OWNER_LINE_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Provision isolated database and check LINE identity
+        run: node scripts/provision.mjs
+      - name: Deploy locked personal Worker
+        run: npx wrangler deploy
+      - name: Set separate memo LINE secrets
+        run: |
+          node --input-type=module -e 'const {execFileSync}=await import("node:child_process");for(const [key,source] of Object.entries({LINE_CHANNEL_SECRET:"MEMO_LINE_CHANNEL_SECRET",LINE_CHANNEL_ACCESS_TOKEN:"MEMO_LINE_CHANNEL_ACCESS_TOKEN",OWNER_LINE_USER_ID:"MEMO_OWNER_LINE_USER_ID"})){execFileSync("./node_modules/.bin/wrangler",["secret","put",key],{input:process.env[source]||"LOCKED",stdio:["pipe","pipe","pipe"]});}console.log("Memo secrets configured without disclosure.");'
+      - name: Connect and verify new LINE webhook
+        run: node scripts/connect.mjs

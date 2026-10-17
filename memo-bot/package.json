@@ -1,0 +1,1 @@
+{"name":"hongzhe-personal-memo","private":true,"type":"module","scripts":{"test":"node --test"},"devDependencies":{"wrangler":"4.151.1"}}
