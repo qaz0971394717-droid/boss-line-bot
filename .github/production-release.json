@@ -1,5 +1,5 @@
 {
-  "sha": "faaf7529e95e32d0c93b6d267e903fbde600a168",
-  "acceptance": "User tested undo in staging and explicitly approved production on 2026-10-17 Asia/Taipei",
-  "tests": 71
+  "sha": "20310f7d55e19336ccb2a0b441d0f3d89035acea",
+  "acceptance": "User approved production undo button rollout on 2026-10-17 Asia/Taipei",
+  "tests": 72
 }
