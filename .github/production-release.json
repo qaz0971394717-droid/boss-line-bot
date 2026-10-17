@@ -1,5 +1,5 @@
 {
-  "sha": "20310f7d55e19336ccb2a0b441d0f3d89035acea",
-  "acceptance": "User approved production undo button rollout on 2026-10-17 Asia/Taipei",
-  "tests": 72
+  "sha": "0f7e86cb1501ccdd4675080c379eb5fb8e963c24",
+  "acceptance": "User approved duplicate K confirmation for production on 2026-10-17 Asia/Taipei",
+  "tests": 74
 }
