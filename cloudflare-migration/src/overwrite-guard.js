@@ -17,7 +17,7 @@ export async function checkOverwrite(command,chat,env,now,context){
  if(owners[0]?.user_id===context.userId)return null;
  const token=crypto.randomUUID();
  await q('INSERT INTO overwrite_confirmations(token,chat_id,user_id,command,expected_version,requested_at,expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET token=excluded.token,command=excluded.command,expected_version=excluded.expected_version,requested_at=excluded.requested_at,expires_at=excluded.expires_at',token,chat,context.userId,command,version,now.toISOString(),Date.now()+60000).all();
- return {type:'text',text:`${row.boss_name} 剛有人報過，要覆蓋嗎？\n僅你可確認，60 秒內有效。`,quickReply:{items:[{type:'action',action:{type:'postback',label:'確認覆蓋',data:'overwrite:confirm:'+token,displayText:'確認覆蓋'}},{type:'action',action:{type:'postback',label:'保留原紀錄',data:'overwrite:cancel:'+token,displayText:'保留原紀錄'}}]}};
+ return {type:'text',text:`因重複 K 時間，是否保存新紀錄？\n僅你可確認，60 秒內有效。`,quickReply:{items:[{type:'action',action:{type:'postback',label:'確認',data:'overwrite:confirm:'+token,displayText:'確認保存新紀錄'}},{type:'action',action:{type:'postback',label:'取消',data:'overwrite:cancel:'+token,displayText:'取消保存新紀錄'}}]}};
 }
 export async function consumeOverwrite(command,chat,env,user){
  if(!/^(確認覆蓋|取消覆蓋) [a-f0-9-]{36}$/.test(command))return null;
