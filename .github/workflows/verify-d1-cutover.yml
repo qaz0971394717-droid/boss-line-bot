@@ -1,0 +1,43 @@
+name: Verify completed D1 cutover
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/verify-d1-cutover.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify active bindings and preserved group scopes
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          base="https://api.cloudflare.com/client/v4/accounts/"+os.environ["CF_ACCOUNT"]
+          def api(path,body=None):
+              req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body else None,headers={"Authorization":"Bearer "+os.environ["CF_TOKEN"],"Content-Type":"application/json"})
+              with urllib.request.urlopen(req) as response: data=json.load(response)
+              assert data.get("success")
+              return data["result"]
+          targets=[("hit2-boss-production","db692969-0b74-4dc5-952a-604847e15628"),("hit2-boss-staging","dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5")]
+          for worker,expected in targets:
+              bindings=api("/workers/scripts/"+worker+"/settings")["bindings"]
+              db=next(x for x in bindings if x["type"]=="d1" and x["name"]=="BOSS_DB")
+              assert db.get("id",db.get("database_id"))==expected
+              values={x["name"]:x.get("text") for x in bindings if x["type"]=="plain_text"}
+              assert values.get("DATABASE_BACKEND")=="d1"
+              assert values.get("MIGRATION_MODE")!="true"
+              assert not any(x["name"]=="MIGRATION_KEY" for x in bindings)
+              if worker.endswith("production"):
+                  assert values.get("ENABLE_LINE")=="true" and values.get("ENABLE_ADMIN")=="true"
+              else:
+                  assert values.get("ENABLE_STAGING_LINE")=="true" and values.get("ENABLE_STAGING_REMINDERS")=="false"
+              counts=api("/d1/database/"+expected+"/query",{"sql":"SELECT (SELECT count(*) FROM boss_types) AS boss_types,(SELECT count(*) FROM boss_kills) AS boss_kills,(SELECT count(*) FROM chat_settings) AS chat_settings,(SELECT count(DISTINCT chat_id) FROM boss_kills) AS active_group_scopes"})[0]["results"][0]
+              if worker.endswith("production"): assert counts["active_group_scopes"]>=2
+              print(worker+": D1 verified, migration access disabled, aggregate counts="+json.dumps(counts))
+          print("PASS: completed D1 cutover verified for both independent databases.")
+          PY
