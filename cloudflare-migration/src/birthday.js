@@ -6,9 +6,7 @@ export const birthdayEnabled = (env, chatId) =>
   env.STAGING_MODE === 'true' && env.PRODUCTION_MODE !== 'true' &&
   env.ENABLE_BIRTHDAY_SURPRISE === 'true' && chatId === BIRTHDAY_CHAT_ID;
 
-export const birthdayGreeting = () => ({type:'text',text:
-  '🎂 多多綠大姊，生日快樂！🎉\n\n打王出寶，天天都有橘箱 橘箱出羽毛'
-});
+export const birthdayGreeting = () => ({type:'text',text:"🎂 多多綠大姊，生日快樂！🎉\n\n⚔️ 打王出寶，好運滿滿！\n🎁 天天都有橘箱\n🪶 橘箱一開，羽毛就來！"});
 
 export function addBirthdayButton(message, env, chatId) {
   if (!birthdayEnabled(env, chatId)) return message;
