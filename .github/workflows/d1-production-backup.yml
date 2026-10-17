@@ -47,6 +47,14 @@ jobs:
           D1_BACKUP_RECEIPT: ${{ runner.temp }}/d1-production-receipt.json
           D1_MAINTENANCE_RESULT: ${{ runner.temp }}/d1-production-maintenance.json
         run: node scripts/maintain-d1.mjs cleanup production
+      - name: Load private LINE notification authorization
+        if: always()
+        continue-on-error: true
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/ops-alert-key.py
       - name: Check usage and publish deduplicated alerts
         if: always()
         env:
