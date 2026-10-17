@@ -28,6 +28,10 @@ with tempfile.TemporaryDirectory() as tmp:
  for sql,params in [("DELETE FROM memo_events WHERE event_id IN (SELECT event_id FROM memo_events WHERE state='delivered' AND updated_at<? LIMIT 250)",[cutoff]),("DELETE FROM memo_items WHERE id IN (SELECT id FROM memo_items WHERE owner_id=? AND deleted_at IS NOT NULL AND deleted_at<? LIMIT 250)",[os.environ.get('MEMO_OWNER_LINE_USER_ID','LOCKED'),deleted])]:
   result=api('/d1/database/'+id+'/query',{'sql':sql,'params':params})
   if any(not row.get('success') for row in result):raise RuntimeError('Memo retention failed')
+ for table in ['google_tickets','google_states']:
+  if table in tables:
+   result=api('/d1/database/'+id+'/query',{'sql':f'DELETE FROM {table} WHERE hash IN (SELECT hash FROM {table} WHERE expires_at<? LIMIT 250)','params':[int(now.timestamp()*1000)]})
+   if any(not row.get('success') for row in result):raise RuntimeError('Expired OAuth state cleanup failed')
  for page in s.get_paginator('list_objects_v2').paginate(Bucket=bucket,Prefix=prefix):
   for obj in page.get('Contents',[]):
    if obj['Key'].endswith('.sql') and obj['LastModified']<now-datetime.timedelta(days=30):s.delete_object(Bucket=bucket,Key=obj['Key'])

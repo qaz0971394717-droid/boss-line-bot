@@ -14,3 +14,17 @@
 webhook 先驗簽再授權；event ID 持久化去重；不確定執行狀態不會重播寫入。若寫入成功但回覆儲存失敗，事件保留 pending，需要人工核對。沒有公開資料讀取端點，Google 日曆 URL 只在本人回覆內產生。
 
 備份及資料保留：備忘不自動刪除；刪除動作採軟刪除。每天驗證 D1 SQL 備份至私人 R2 後，清除超過 14 天已送達 event（保留未完成），清除超過 30 天軟刪除資料。R2 日常備份保留 30 天。Google 日曆屬使用者自身帳號，與備份分開。
+
+## Google 日曆直接新增（需要額外 Google 授權設定）
+
+設定 GitHub Secrets `MEMO_GOOGLE_CLIENT_ID`、`MEMO_GOOGLE_CLIENT_SECRET` 後重新部署。OAuth 用戶端類型為網頁應用程式，精確重新導向 URI：
+
+`https://hongzhe-personal-memo.qaz0971394717.workers.dev/google/callback`
+
+只申請 `https://www.googleapis.com/auth/calendar.app.created`。LINE 私訊「連結日曆」產生 10 分鐘單次使用連結；驗證 state、相同瀏覽器 HttpOnly Cookie 及 PKCE 後交換授權。專用日曆由程式建立，不讀取其他既有日曆。Refresh token 使用 AES-GCM 加密，金鑰只保存在這個 Worker 的 secret。資料庫或 R2 備份不含解密金鑰；若 Worker 金鑰遺失，須重新授權 Google。請勿覆寫 GOOGLE_TOKEN_KEY。
+
+Google 專案若為 External + Testing，refresh token 一般會在 7 天後失效。個人正式使用前需適當設定 Google Auth Platform 的發布狀態，依 Google 要求完成所需設定；失效時提示重新連結，不假裝新增成功。
+
+完成連結後「確認新增至日曆」會以固定事件 ID 寫入專用日曆，提前 10 分鐘 popup；成功收到回應才確認。逾時重試先查同事件 ID，避免重複新增。不會自動匯入舊資料、不會通知其他參與者、不會發送 LINE 推播。已用手動連結存入 Google 的舊提醒不受程式管理，請勿再次用直接新增按鈕重複加入。
+
+完成／刪除備忘不會同步修改或刪除 Google 事件。程式不會自行新增測試行程；需要使用者點選確認新增。

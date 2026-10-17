@@ -22,6 +22,8 @@ jobs:
       MEMO_LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.MEMO_LINE_CHANNEL_ACCESS_TOKEN }}
       MEMO_LINE_CHANNEL_SECRET: ${{ secrets.MEMO_LINE_CHANNEL_SECRET }}
       MEMO_OWNER_LINE_USER_ID: ${{ secrets.MEMO_OWNER_LINE_USER_ID }}
+      MEMO_GOOGLE_CLIENT_ID: ${{ secrets.MEMO_GOOGLE_CLIENT_ID }}
+      MEMO_GOOGLE_CLIENT_SECRET: ${{ secrets.MEMO_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,5 +38,7 @@ jobs:
       - name: Set separate memo LINE secrets
         run: |
           node --input-type=module -e 'const {execFileSync}=await import("node:child_process");for(const [key,source] of Object.entries({LINE_CHANNEL_SECRET:"MEMO_LINE_CHANNEL_SECRET",LINE_CHANNEL_ACCESS_TOKEN:"MEMO_LINE_CHANNEL_ACCESS_TOKEN",OWNER_LINE_USER_ID:"MEMO_OWNER_LINE_USER_ID"})){execFileSync("./node_modules/.bin/wrangler",["secret","put",key],{input:process.env[source]||"LOCKED",stdio:["pipe","pipe","pipe"]});}console.log("Memo secrets configured without disclosure.");'
+      - name: Configure optional Google authorization
+        run: node scripts/configure-google.mjs
       - name: Connect and verify new LINE webhook
         run: node scripts/connect.mjs
