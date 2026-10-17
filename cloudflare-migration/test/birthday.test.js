@@ -18,7 +18,7 @@ test('birthday button is limited to the enabled target group and preserves KB ac
  assert.ok(JSON.stringify(decorated).includes('kbkill:王0'));
  assert.ok(!JSON.stringify(original).includes(BIRTHDAY_COMMAND));
  assert.ok(!JSON.stringify(decorated.contents.contents[1]).includes(BIRTHDAY_COMMAND));
- for(const [env,chat] of [[{},BIRTHDAY_CHAT_ID],[enabled,'another-group'],[{...enabled,PRODUCTION_MODE:'true'},BIRTHDAY_CHAT_ID]]){
+ for(const [env,chat] of [[{},BIRTHDAY_CHAT_ID],[enabled,'another-group'],[{...enabled,PRODUCTION_MODE:'true',ENABLE_BIRTHDAY_SURPRISE:'false'},BIRTHDAY_CHAT_ID]]){
   assert.equal(addBirthdayButton(original,env,chat),original);
  }
  const empty=addBirthdayButton(createKbFlex([]),enabled,BIRTHDAY_CHAT_ID);
@@ -59,14 +59,28 @@ test('signed birthday postback returns one greeting and ignores other groups',as
  assert.equal((await app.fetch(await request('birthday',BIRTHDAY_CHAT_ID),env)).status,200);
  assert.equal((await app.fetch(await request('birthday',BIRTHDAY_CHAT_ID),env)).status,200);
  assert.equal(replies,1);
+ const production=createProductionWorker({worker:app});
+ const prodEnv={...env,PRODUCTION_MODE:'true',ENABLE_LINE:'true'};
+ assert.equal((await production.fetch(await request('production-birthday',BIRTHDAY_CHAT_ID),prodEnv)).status,200);
+ assert.equal(replies,2);
+ await production.fetch(await request('production-private','U'+'a'.repeat(32)),prodEnv);
+ await production.fetch(await request('production-other','Canother-group'),prodEnv);
+ assert.equal(replies,2);
 });
 
-test('production adapter does not forward the staging birthday switch',async()=>{
+test('production birthday is enabled only for the exact approved group',async()=>{
  let received;
  const app=createProductionWorker({worker:{fetch(request,env){received=env;return new Response('ok');}}});
  await app.fetch(new Request('https://prod.test/callback',{method:'POST'}),{PRODUCTION_MODE:'true',ENABLE_LINE:'true',DATABASE_URL:'production-only',LINE_CHANNEL_SECRET:'secret',LINE_CHANNEL_ACCESS_TOKEN:'token',ENABLE_BIRTHDAY_SURPRISE:'true'});
- assert.equal(received.ENABLE_BIRTHDAY_SURPRISE,undefined);
- assert.ok(!JSON.stringify(addBirthdayButton(createKbFlex([]),received,BIRTHDAY_CHAT_ID)).includes(BIRTHDAY_COMMAND));
+ assert.equal(received.ENABLE_BIRTHDAY_SURPRISE,'true');
+ assert.equal(received.PRODUCTION_MODE,'true');
+ assert.ok(JSON.stringify(addBirthdayButton(createKbFlex([]),received,BIRTHDAY_CHAT_ID)).includes(BIRTHDAY_COMMAND));
+ for(const chat of ['U'+'a'.repeat(32),'Canother-group','Rroom']){
+  assert.ok(!JSON.stringify(addBirthdayButton(createKbFlex([]),received,chat)).includes(BIRTHDAY_COMMAND));
+  assert.equal(await shouldProcessCommand(BIRTHDAY_COMMAND,chat,received,{}),false);
+  assert.equal(await handleLineCommand(BIRTHDAY_COMMAND,chat,received),null);
+ }
+ assert.equal(addBirthdayButton(createKbFlex([]),{...received,ENABLE_BIRTHDAY_SURPRISE:undefined},BIRTHDAY_CHAT_ID).quickReply,undefined);
 });
 
 test('staging private chat can preview birthday KB without joining a group',async()=>{

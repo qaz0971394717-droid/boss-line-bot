@@ -20,6 +20,8 @@ export function createProductionWorker({ worker = createWorker(), migrationHandl
       }
       return worker.fetch(request, {
         STAGING_MODE: 'true',
+        PRODUCTION_MODE: 'true',
+        ENABLE_BIRTHDAY_SURPRISE: env.ENABLE_BIRTHDAY_SURPRISE,
         DATABASE_BACKEND: env.DATABASE_BACKEND,
         ENABLE_UNDO: env.ENABLE_UNDO,
         ENABLE_OVERWRITE_GUARD: env.ENABLE_OVERWRITE_GUARD,
