@@ -1,0 +1,41 @@
+name: Verify bound LINE operations notification
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/test-line-ops-notification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-line-ops-binding
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: cloudflare-migration
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 05a089dd14830f31e7937f6d8ba368b9a306e8e9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 -m pip install boto3
+      - name: Load private relay authorization
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python3 scripts/ops-alert-key.py
+      - name: Send one labeled test and verify duplicate suppression
+        run: |
+          node --input-type=module -e '
+            import {notifyOps} from "./scripts/notify-ops.mjs";
+            const event={target:"staging",kind:"alert",incident:"binding-test-20261017",message:"【串接測試】LINE 異常通知已接通。這是測試訊息，並非系統故障。"};
+            if(!await notifyOps(event))throw Error("Notification destination not bound");
+            if(!await notifyOps(event))throw Error("Duplicate verification failed");
+            console.log("PASS: LINE accepted the labeled test; repeated incident was acknowledged without a second push.");
+          '
