@@ -1,3 +1,5 @@
+import {checkOverwrite,consumeOverwrite} from './overwrite-guard.js';
+import {undoEnvironment} from './undo.js';
 import {undoLast} from './undo.js';
 import {createHelpFlex,createHelpText} from './help-flex.js';
 // Staging-only LINE command engine. No production webhook is routed here yet.
@@ -29,6 +31,11 @@ export function parseRespawnTime(day,clock) {
 }
 
 export async function handleLineCommand(command, chatId, env, now=new Date(), context={}) {
+ const confirmation=await consumeOverwrite(command,chatId,env,context.userId);
+ if(confirmation?.reply)return confirmation.reply;
+ if(confirmation?.row){const p=confirmation.row;return handleLineCommand(p.command,chatId,undoEnvironment(env,p.command,chatId,context.userId),new Date(p.requested_at),{...context,overwriteVersion:p.expected_version});}
+ const protectedReply=await checkOverwrite(command,chatId,env,now,context);
+ if(protectedReply)return protectedReply;
  const reply=await runLineCommand(command,chatId,env,now,context);
  if(reply&&env.ENABLE_UNDO_BUTTON==='true'&&env.UNDO_OPERATION_ID&&context.userId){
   const result=await env.BOSS_DB.prepare('SELECT id FROM undo_entries WHERE chat_id=? AND user_id=? AND operation_id=? LIMIT 1').bind(chatId,context.userId,env.UNDO_OPERATION_ID).all();

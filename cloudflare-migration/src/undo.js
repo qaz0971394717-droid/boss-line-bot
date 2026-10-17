@@ -11,18 +11,26 @@ export function undoEnvironment(env,command,chat,user){
  if(env.ENABLE_UNDO!=='true'||!user||!env.BOSS_DB?.batch)return env;
  const parts=command.trim().split(/\s+/),kind=parts[0].toUpperCase();
  if(!['K','KBKILL','取消','修改出生'].includes(kind))return env;
- const op=crypto.randomUUID(),db=env.BOSS_DB;
- return {...env,UNDO_OPERATION_ID:op,BOSS_DB:{prepare(query){
+ const op=crypto.randomUUID(),db=env.BOSS_DB,guard={};
+ return {...env,UNDO_OPERATION_ID:op,UNDO_GUARD:guard,BOSS_DB:{prepare(query){
   const original=db.prepare(query);
   return {bind(...params){const bound=original.bind(...params);
    return {async all(){
     if(!/^(INSERT INTO|UPDATE|DELETE FROM) boss_kills\b/i.test(query.trim()))return bound.all();
     const key=kind==='取消'?String(params[1]).toLowerCase():String(parts.slice(1).join(' ').split(/\s+/)[0]).toLowerCase();
+    let mutation=bound;
+    if(guard.expectedRevision!==undefined&&['K','KBKILL'].includes(kind)){
+     const condition='COALESCE((SELECT version FROM boss_revisions WHERE chat_id=? AND boss_key=?),0)=?';
+     let guarded=query;
+     if(/^INSERT/i.test(query))guarded=query.replace(/VALUES\(([^)]*)\)/i,(_,values)=>'SELECT '+values+' WHERE '+condition);
+     else guarded=query.replace(/ RETURNING /i,' AND '+condition+' RETURNING ');
+     mutation=db.prepare(guarded).bind(...params,chat,key,guard.expectedRevision);
+    }
     const id=crypto.randomUUID(),expiry=Date.now()+600000;
     const q=(s,...p)=>db.prepare(s).bind(...p);
     const result=await db.batch([
      q(`INSERT INTO undo_entries(id,operation_id,chat_id,user_id,boss_key,before_json,expires_at) VALUES(?,?,?,?,?,(SELECT ${snapshot} FROM boss_kills WHERE chat_id=? AND boss_key=?),?)`,id,op,chat,user,key,chat,key,expiry),
-     bound,
+     mutation,
      q('UPDATE undo_entries SET after_version=COALESCE((SELECT version FROM boss_revisions WHERE chat_id=? AND boss_key=?),0) WHERE id=? AND changes()>0',chat,key,id),
      q('DELETE FROM undo_entries WHERE id=? AND after_version IS NULL',id),
      q('DELETE FROM undo_entries WHERE chat_id=? AND user_id=? AND operation_id!=? AND EXISTS(SELECT 1 FROM undo_entries WHERE id=?)',chat,user,op,id)

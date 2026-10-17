@@ -85,7 +85,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         if (event.mode === "standby" || !event.replyToken) continue;
         const chatId = getChatId(event.source);
         if (chatId === "unknown") continue;
-        const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : event.type === "postback" && /^undo:[a-f0-9-]{36}$/.test(event.postback?.data||"") ? "復原" : null;
+        const command = event.type === "message" && event.message?.type === "text" && typeof event.message.text === "string" ? event.message.text : event.type === "postback" && typeof event.postback?.data === "string" && event.postback.data.startsWith("kbkill:") ? "KBKILL " + event.postback.data.slice(7) : event.type === "postback" && /^undo:[a-f0-9-]{36}$/.test(event.postback?.data||"") ? "復原" : event.type === "postback" && /^overwrite:(confirm|cancel):[a-f0-9-]{36}$/.test(event.postback?.data||"") ? (event.postback.data.split(":")[1]==="confirm"?"確認覆蓋 ":"取消覆蓋 ")+event.postback.data.split(":")[2] : null;
         if (!command) continue;
         if (expiredEvent(event)) continue;
         let stage = "event-validation";
