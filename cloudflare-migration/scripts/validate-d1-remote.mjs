@@ -19,7 +19,7 @@ try {
  const created=await api('',{name});ids.push(created.uuid);
  const schema=readFileSync(new URL('../d1/0001_core.sql',import.meta.url),'utf8');
  for(const sql of schema.split(';').filter(x=>x.trim()))await api('/'+created.uuid+'/query',{sql});
- const env={DATABASE_BACKEND:'d1',BOSS_DB:binding(created.uuid),STAGING_MODE:'true',ENABLE_STAGING_ADMIN:'true',ADMIN_PASSWORD:crypto.randomUUID()};
+ const env={ENABLE_EVENT_ORDER_GUARD:'true',DATABASE_BACKEND:'d1',BOSS_DB:binding(created.uuid),STAGING_MODE:'true',ENABLE_STAGING_ADMIN:'true',ADMIN_PASSWORD:crypto.randomUUID()};
  const sql=createSql(env),now=new Date('2026-10-17T00:00:00Z');
  await sql`INSERT INTO boss_types(boss_key,boss_name,minutes) VALUES(${'驗證h'},${'驗證H'},${120})`;
  await handleLineCommand('HALF ON','validation-a',env,now);

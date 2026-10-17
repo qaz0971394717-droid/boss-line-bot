@@ -21,6 +21,7 @@ export function createProductionWorker({ worker = createWorker(), migrationHandl
       return worker.fetch(request, {
         STAGING_MODE: 'true',
         DATABASE_BACKEND: env.DATABASE_BACKEND,
+        ENABLE_EVENT_ORDER_GUARD: env.ENABLE_EVENT_ORDER_GUARD,
         BOSS_DB: env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB : undefined,
         ENABLE_STAGING_LINE: 'true',
         STAGING_DATABASE_URL: env.DATABASE_URL,

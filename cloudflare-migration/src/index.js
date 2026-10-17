@@ -1,3 +1,4 @@
+import { shouldProcessCommand } from "./command-filter.js";
 import { expiredEvent } from "./retention-policy.js";
 import { migrationGate } from "./migration.js";
 import { createSql, hasDatabase } from "./database.js";
@@ -86,6 +87,9 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         let stage = "event-validation";
         try {
           if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");
+          const context={userId:event.source?.userId,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
+          stage = "command-filter";
+          if(commandHandler===handleLineCommand&&!await shouldProcessCommand(command,chatId,env,context))continue;
           stage = "database-client";
           eventStore ||= eventStoreFactory(env);
           stage = "event-claim";
@@ -93,9 +97,10 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           if (claim.state === "done") { outcomes.push("ok"); continue; }
           if (claim.state === "pending") throw new Error("Event requires reconciliation");
           stage = "command";
-          const reply = claim.state === "ready" ? claim.reply : await commandHandler(command, chatId, env);
+          const reply = claim.state === "ready" ? claim.reply : await commandHandler(command, chatId, env, new Date(context.eventTimestamp), context);
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
+          if(!reply){await eventStore.delivered(event.webhookEventId);outcomes.push('ok');continue;}
           stage = "line-reply";
           const res = await fetchWithTimeout("https://api.line.me/v2/bot/message/reply", {
             method: "POST",

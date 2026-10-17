@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS boss_kills (
  boss_name TEXT NOT NULL,
  kill_time TEXT NOT NULL,
  respawn_time TEXT NOT NULL,
+ last_event_ms INTEGER NOT NULL DEFAULT 0,
  UNIQUE(chat_id,boss_key)
 );
 CREATE INDEX IF NOT EXISTS boss_kills_chat_respawn ON boss_kills(chat_id,respawn_time);
@@ -29,3 +30,5 @@ CREATE TABLE IF NOT EXISTS staging_line_events (
  delivered_at TEXT,
  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+
+CREATE TABLE IF NOT EXISTS command_confirmations (chat_id TEXT NOT NULL,user_id TEXT NOT NULL,expires_at TEXT NOT NULL,PRIMARY KEY(chat_id,user_id));
