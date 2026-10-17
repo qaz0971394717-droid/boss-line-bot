@@ -1,64 +1,65 @@
-# D1 migration candidate — not enabled in production
+# D1 migration status — 2026-10-17
 
-The production worker continues using Neon; the staging worker now uses D1. Production data has only been copied for disposable restore drills; production
-writes and configuration have not been changed. Do not enable D1 on the production
-worker before completing the remaining checks below.
+Both LINE workers now use Cloudflare D1. Production and staging have separate
+D1 databases and separate data. Neon data is retained as a historical rollback
+source; it is not current after D1 begins accepting writes.
 
-## Implemented
+## Production
 
-- Explicit `DATABASE_BACKEND=d1` plus `BOSS_DB` binding; missing D1 cannot fall back
-  to Neon. Existing Neon configuration remains the default.
-- SQLite schema, indexed group/time lookup, bound-value SQL adapter, JSON and UTC
-  timestamp conversion. Existing pending event claims are preserved, never replayed.
-- Read-only PostgreSQL snapshot export and private-file SQL converter with per-table
-  row counts and deterministic content hashes. No user data is stored in git.
-- SQLite integration tests exercise command operations, event claims and migration.
-  These are not a substitute for testing a real D1 binding in Workers.
+- Worker: hit2-boss-production
+- Config: wrangler.production.toml
+- D1: hit2-boss-d1-production-38984686581
+- ID: db692969-0b74-4dc5-952a-604847e15628
+- Final source: the production Worker's own DATABASE_URL, exported through a
+  temporary authenticated no-store route during a brief maintenance window.
+- Preserved and compared: 62 boss types, 35 kills, 2 chat settings, 0 challenges,
+  8 event records. No group identifiers or private row contents logged.
+- Real D1 export uploaded to private R2 at
+  d1-production/migration-38984686581.sql, downloaded, restored into an independent
+  D1 database and compared across all five tables before activation.
+- Migration run: https://github.com/qaz0971394717-droid/boss-line-bot/actions/runs/38984686581
+- Migration mode disabled and temporary secret removed.
 
-## Authorization and verified progress
+## Staging
 
-Token authorization now passes. Real D1 command tests and a Neon snapshot -> D1
--> R2 -> independent D1 restore drill passed. Production snapshot contained 62
-boss types, 35 kills, 2 chat settings and 8 event records, compared across all
-five tables without logging private row contents.
+- Config: wrangler.d1-staging.toml
+- D1 ID: dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5
+- Its own source snapshot preserved 62 types, 0 kills, 1 setting, 0 challenges,
+  41 events; production rows were NOT copied into staging.
+- R2 cutover backup: d1-staging/migration-38984107626.sql; restore compared before
+  activation. Independent API verification resolved an initially uncertain
+  immediate health check after deployment.
+- User confirmed actual LINE test reply says Cloudflare D1 on 2026-10-17 08:03.
+- Daily backups: private R2 d1-staging/daily/, 30-day retention, 05:15 Taipei
+  schedule (GitHub may delay execution). Initial scheduled-workflow push run passed.
 
-Staging has now been migrated to D1 using its OWN source snapshot: 62 boss types,
-0 kills, 1 chat setting and 41 event records. Its R2 backup was restored and
-compared before activation. The initial post-deploy health request failed, so
-activation was conservatively marked uncertain; subsequent independent API
-verification confirmed the exact D1 binding, flags, and disabled migration mode.
-Public health separately reported database_backend=d1. Do not rerun the staging
-migration as a rollback. Use wrangler.d1-staging.toml for future staging deploys.
+## Backup and recovery
 
-Production still uses Neon. Live LINE validation of staging, production
-maintenance/synchronization/cutover and recurring D1 production backups remain
-required. No API token should be pasted into chat or source files.
+Production daily D1 backups use scripts/backup-d1-production.mjs with private
+R2 prefix d1-production/daily/. Each backup is downloaded and SHA-256 compared.
+Daily files are retained 30 days. Keep historical PostgreSQL .dump files;
+PostgreSQL and D1 SQL backups are different formats. R2 bucket remains
+hit2-neon-backup; its historical name does not determine the database format.
 
-## Safe completion order
+Restore a D1 SQL backup into a NEW isolated database first, compare all tables,
+and update the correct Worker binding only after validation. An in-place old
+backup restore loses all writes made after that backup.
 
-1. Create a new isolated D1 validation database and new validation worker. Keep
-   LINE disabled until credentials for the test channel are deliberately assigned.
-2. Apply `d1/0001_core.sql`. Export a read-only source snapshot using psql with
-   `-X -qAt -v ON_ERROR_STOP=1 -f d1/export-postgres.sql`, saving stdout privately.
-   Confirm which Neon branch the secret points to before exporting.
-3. Run `node scripts/convert-postgres-to-d1.mjs source.json import.sql`. Use only
-   an empty target database. Import SQL privately, then compare all five tables'
-   normalized data against the manifest, not just their row counts.
-4. Validate signed webhook processing, LINE replies, every admin action, manual
-   times, concurrent redelivery, two-group isolation and idle-first-message behavior.
-   Measure real D1 rows_read/rows_written and database size. No reminders.
-5. Implement D1 export to private R2 using a separate prefix, download and restore
-   into an independent D1 test database, and compare data. Keep old PostgreSQL
-   backups intact. Existing Neon daily backup is NOT a D1 backup.
-6. Before production cutover, introduce an explicit maintenance gate, let in-flight
-   requests drain, and take a final consistent export. Do not allow both databases
-   to accept independent writes. Verify final import, then switch the worker binding.
-7. Reopen writes, verify both production groups and watch errors/quotas. Rollback
-   after accepting D1 writes requires migrating those new writes back; reverting
-   config alone would lose them. Do not delete Neon during the rollback window.
+Do not deploy an old Neon config as a casual rollback. New D1 writes would be
+lost. Returning to PostgreSQL requires a maintenance window, export and reverse
+conversion of current D1 data, validation and resynchronization before writes
+resume. The historical Neon snapshot alone is not a lossless rollback.
 
-## Remaining work
+## Validation and limits
 
-Live staging LINE validation, recurring D1 production backup scheduling, a
-production maintenance gate, final synchronization and production cutover have
-NOT been completed. No claim is made that this candidate fixes the first-message problem.
+56 tests pass, including SQLite command/migration tests, D1 binding requirements,
+maintenance authentication and redelivery protection. Real remote D1 tests
+validated concurrent claims, JSON replies, admin operations, HALF/time and group
+isolation. Production and staging migration restore drills passed independently.
+Actual production LINE reply verification is still requested after cutover.
+
+This migration removes Neon from the running bot database path. It does not
+prove the earlier first-message failure is fully resolved. Observe idle-first
+messages separately. Free-tier limits and all future changes still require
+monitoring. Pending event claims are deliberately never automatically replayed.
+Reminders remain disabled.

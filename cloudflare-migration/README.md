@@ -1,3 +1,5 @@
+> Current deployment (2026-10-17): both staging and production use separate Cloudflare D1 databases. See [D1-MIGRATION.md](D1-MIGRATION.md) for current bindings, verified backup/restore and rollback constraints. Neon-specific instructions below describe the historical migration path.
+
 # Cloudflare Workers migration (isolated development)
 
 This branch is intentionally separate from production `main`. **Do not change LINE or Discord webhook URLs until parity tests pass.**

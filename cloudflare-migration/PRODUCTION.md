@@ -1,3 +1,5 @@
+> Current production uses Cloudflare D1 via wrangler.production.toml. Neon and Render hold historical data only. Do not revert to them without reconciling new D1 writes. See [D1-MIGRATION.md](D1-MIGRATION.md) for the completed cutover and current recovery procedure. Instructions below are retained as historical context.
+
 # Production deployment
 
 Staging remains on `wrangler.toml`; production uses `wrangler.production.toml`
