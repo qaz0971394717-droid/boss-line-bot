@@ -4,7 +4,10 @@ const text=value=>({type:'text',text:value});
 const action=(label,value)=>({type:'action',action:{type:'message',label,text:value}});
 const query=(db,s,...p)=>db.prepare(s).bind(...p);
 export const knownCommand=input=>/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(input.trim());
-const help=()=>text('📒 個人備忘\n\n備忘 DL380 主板 P11782-001\n待辦 買硬碟\n提醒 明天 15:00 帶硬碟\n提醒 2026-10-20 09:30 客戶維修\n\n今天待辦｜待辦｜備忘列表\n查備忘 關鍵字｜查看 編號\n完成 編號｜刪除 編號\n\n提醒需點「加入 Google 日曆」並儲存，通知由日曆負責。');
+const help=(googleReady=false)=>({
+ ...text('📒 我的備忘\\n\\n📝 記事情\\n備忘 買牛奶\\n\\n🔔 設提醒\\n提醒 明天 15:00 拿包裹\\n\\n📋 看待辦\\n今天待辦\\n\\n🔎 找筆記\\n查備忘 牛奶\\n\\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
+ quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表')]}
+});
 export function itemCard(item,googleReady=false){
  const button=(label,command)=>({type:'button',height:'sm',style:'secondary',action:{type:'message',label,text:command}});
  const buttons=[];
@@ -20,7 +23,7 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
  if(input==='連結日曆')return linkCalendar(env,owner);
  if(input==='日曆狀態')return calendarStatus({...env,MEMO_DB:db},owner);
  if(/^加入日曆 \d+$/.test(input))return addCalendarEvent({...env,MEMO_DB:db},owner,Number(input.split(' ')[1]),fetcher);
- if(input==='指令'||input.toUpperCase()==='HELP'){const reply=help();if(googleReady)reply.text=reply.text.replace('提醒需點「加入 Google 日曆」並儲存，通知由日曆負責。','先輸入「連結日曆」完成一次授權。之後點「確認新增至日曆」即可加入，提前 10 分鐘通知。\n日曆狀態：日曆狀態');return reply;}
+ if(input==='指令'||input.toUpperCase()==='HELP')return help(googleReady);
  if(input==='測試')return text('✅ 個人備忘正常｜僅限本人私訊使用\n資料庫：Cloudflare D1\n提醒方式：手動加入 Google 日曆');
  const note=input.match(/^(備忘|待辦)[:：\s]+(.+)$/s);
  if(note&&!/^待辦\s+\d+$/.test(input)){
@@ -70,5 +73,5 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
   if(rows.length>8&&!list)reply.text+='\n符合資料較多，請縮小搜尋或輸入「待辦」分頁查看。';
   return reply;
  }
- return help();
+ return help(googleReady);
 }

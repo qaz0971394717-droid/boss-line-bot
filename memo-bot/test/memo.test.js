@@ -45,3 +45,13 @@ test('reminder cards are concise and deletion offers both choices without immedi
  assert.ok(knownCommand('連同日曆刪除 1'));
  }finally{db.close();}
 });
+
+test('help shows concise everyday examples and three read-only shortcuts',async()=>{
+ const {db,binding}=fixture();try{
+ const help=await runCommand('指令',{db:binding,owner,eventId:'help',env:{GOOGLE_CLIENT_ID:'configured',GOOGLE_CLIENT_SECRET:'configured',GOOGLE_TOKEN_KEY:'configured'}});
+ assert.match(help.text,/備忘 買牛奶/);assert.match(help.text,/提醒 明天 15:00 拿包裹/);
+ assert.ok(!/DL380|P11782|完成 編號|刪除 編號|Google 授權|2026-10-20/.test(help.text));
+ assert.ok(help.text.length<200);assert.deepEqual(help.quickReply.items.map(x=>x.action.text),['今天待辦','待辦','備忘列表']);
+ assert.equal(db.prepare('SELECT count(*) n FROM memo_items').get().n,0);
+ }finally{db.close();}
+});
