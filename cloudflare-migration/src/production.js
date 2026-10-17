@@ -22,6 +22,7 @@ export function createProductionWorker({ worker = createWorker(), migrationHandl
         STAGING_MODE: 'true',
         DATABASE_BACKEND: env.DATABASE_BACKEND,
         ENABLE_UNDO: env.ENABLE_UNDO,
+        ENABLE_OVERWRITE_GUARD: env.ENABLE_OVERWRITE_GUARD,
         ENABLE_UNDO_BUTTON: env.ENABLE_UNDO_BUTTON,
         ENABLE_EVENT_ORDER_GUARD: env.ENABLE_EVENT_ORDER_GUARD,
         BOSS_DB: env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB : undefined,
