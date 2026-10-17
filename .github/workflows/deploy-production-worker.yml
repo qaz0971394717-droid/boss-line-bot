@@ -26,7 +26,7 @@ jobs:
         id: release
         working-directory: .
         run: |
-          node -e 'const fs=require("fs");const release=JSON.parse(fs.readFileSync(".github/production-release.json","utf8"));if(!/^[a-f0-9]{40}$/.test(release.sha))throw Error("Approved release SHA missing");fs.appendFileSync(process.env.GITHUB_OUTPUT,"sha="+release.sha+"\\n")'
+          node -e 'const fs=require("fs");const release=JSON.parse(fs.readFileSync(".github/production-release.json","utf8"));if(!/^[a-f0-9]{40}$/.test(release.sha))throw Error("Approved release SHA missing");fs.appendFileSync(process.env.GITHUB_OUTPUT,"sha="+release.sha+String.fromCharCode(10))'
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.release.outputs.sha }}
