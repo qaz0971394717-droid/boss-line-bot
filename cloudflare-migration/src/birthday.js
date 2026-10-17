@@ -7,10 +7,7 @@ export const birthdayEnabled = (env, chatId) =>
   env.ENABLE_BIRTHDAY_SURPRISE === 'true' && chatId === BIRTHDAY_CHAT_ID;
 
 export const birthdayGreeting = () => ({type:'text',text:
-  '🎂 多多綠大姊，生日快樂！🎉\n\n' +
-  '祝妳新的一歲，天天開心、平安健康，想做的事都順順利利！💚\n' +
-  '打王有寶、抽裝歐氣滿滿，好運一路跟著妳！✨\n\n' +
-  '今天妳最大，大家一起祝多多綠大姊生日快樂！🥳🎁'
+  '🎂 多多綠大姊，生日快樂！🎉\n\n打王出寶，天天都有橘箱 橘箱出羽毛'
 });
 
 export function addBirthdayButton(message, env, chatId) {
