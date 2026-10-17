@@ -5,7 +5,7 @@ const action=(label,value)=>({type:'action',action:{type:'message',label,text:va
 const query=(db,s,...p)=>db.prepare(s).bind(...p);
 export const knownCommand=input=>/^(指令|HELP|測試|連結日曆|日曆狀態|加入日曆\s+\d+|今天待辦|待辦(?:\s+\d+)?|備忘列表(?:\s+\d+)?|查備忘\s+.+|(?:查看|文字|完成|取消完成|刪除|確認刪除|連同日曆刪除|取消刪除)\s+\d+|(?:備忘|待辦)[:：\s].+|提醒\s+.+)$/is.test(input.trim());
 const help=(googleReady=false)=>({
- ...text('📒 我的備忘\\n\\n📝 記事情\\n備忘 買牛奶\\n\\n🔔 設提醒\\n提醒 明天 15:00 拿包裹\\n\\n📋 看待辦\\n今天待辦\\n\\n🔎 找筆記\\n查備忘 牛奶\\n\\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
+ ...text('📒 我的備忘\n\n📝 記事情\n備忘 買牛奶\n\n🔔 設提醒\n提醒 明天 15:00 拿包裹\n\n📋 看待辦\n今天待辦\n\n🔎 找筆記\n查備忘 牛奶\n\n'+(googleReady?'提醒建立後，點「確認新增至日曆」。':'提醒建立後，點「加入 Google 日曆」並儲存。')),
  quickReply:{items:[action('今天待辦','今天待辦'),action('全部待辦','待辦'),action('我的筆記','備忘列表')]}
 });
 export function itemCard(item,googleReady=false){
