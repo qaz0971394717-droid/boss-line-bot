@@ -11,7 +11,7 @@ const result={events:0,discord_sent:0,exceptions:0,http_statuses:[]};
 try{
  await new Promise((resolve,reject)=>{
   socket=new WebSocket(tail.url,'trace-v1');
-  const timer=setTimeout(()=>{socket.close();resolve();},120000);
+  const timer=setTimeout(resolve,60000);
   socket.onopen=()=>socket.send(JSON.stringify({debug:false}));
   socket.onmessage=async frame=>{
    try{
@@ -22,13 +22,18 @@ try{
     }
     for(const exception of event.exceptions||[]){
      result.exceptions++;
-     const status=String(exception.message||'').match(/Discord Webhook failed:\\s*(\\d+)/);
+     const status=String(exception.message||'').match(/Discord Webhook failed:\s*(\d+)/);
      if(status)result.http_statuses.push(Number(status[1]));
     }
-    if(result.discord_sent||result.exceptions){clearTimeout(timer);socket.close();resolve();}
+    if(result.discord_sent||result.exceptions){clearTimeout(timer);resolve();}
    }catch{result.parse_errors=(result.parse_errors||0)+1;}
   };
   socket.onerror=()=>{clearTimeout(timer);reject(Error('Reminder log connection failed'));};
  });
  console.log('DISCORD_DELIVERY_OBSERVATION '+JSON.stringify(result));
-}finally{socket?.close();await api(root+'/'+tail.id,'DELETE');console.log('Reminder observation session removed.');}
+}finally{
+ try{socket?.close();}catch{}
+ await api(root+'/'+tail.id,'DELETE');
+ console.log('Reminder observation session removed.');
+ process.exit(0);
+}
