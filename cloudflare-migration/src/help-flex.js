@@ -10,6 +10,7 @@ export function createHelpFlex(section='common',now=new Date()){
  row('補登其他日期',`K 大象H ${day} 2310`,'日期格式：年-月-日；時間 2310＝23:10'),
  row('直接指定出生時間',`修改出生 大象H ${day} 23:10:00`,'這是出生時間，不是擊殺時間'),
  row('開啟減半模式','HALF ON','關閉請輸入 HALF OFF；查看目前模式請輸入 HALF'),
+ row('補同步本群 Discord 提醒','同步提醒','只同步尚未出生的紀錄；不改擊殺或出生時間'),
  row('關閉減半模式','HALF OFF'),
  row('清除本群全部 KB','清除KB','機器人詢問後，由本人於 60 秒內回覆「是」；回覆「否」取消')
  ],[button('檢查運作狀態','測試'),button('查看群組 ID','群組ID'),button('回常用指令','指令')]);

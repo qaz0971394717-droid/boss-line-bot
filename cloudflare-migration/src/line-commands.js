@@ -1,3 +1,4 @@
+import {syncFutureDiscordReminders} from "./discord-reminders.js";
 import {BIRTHDAY_COMMAND,birthdayEnabled,birthdayGreeting,addBirthdayButton} from './birthday.js';
 import {checkOverwrite,consumeOverwrite} from './overwrite-guard.js';
 import {undoEnvironment} from './undo.js';
@@ -66,8 +67,13 @@ async function runLineCommand(command, chatId, env, now=new Date(), context={}) 
   }
   if(input==='復原')return undoLast(env,chatId,context.userId,context.undoOperationId);
   if(env.ENABLE_UNDO==='true'&&input.startsWith('取消 ')&&input.trim().split(/\s+/).length>6)return textMessage('測試版一次最多取消 5 隻王，以確保可完整復原。');
-  const adminReply=clearing?null:await processAdminCommand(input,chatId,env,sql,now);
+  const adminReply=clearing?null:await processAdminCommand(input,chatId,env,sql,now,context);
   if(adminReply)return adminReply;
+  if(input==='同步提醒'){
+    if(env.PRODUCTION_MODE!=='true'||env.ENABLE_DISCORD_REMINDERS!=='true')return textMessage('此環境未啟用 Discord 提醒。');
+    try{const r=await syncFutureDiscordReminders(env,now,chatId);return textMessage(`✅ 已同步 ${r.scheduled} 筆 Discord 提醒。`+(r.skipped?'\n本群未綁定 Discord，已略過。':'')+(r.failed?'\n⚠️ 部分同步失敗，請稍後再試。':''));}
+    catch{return textMessage('⚠️ 提醒同步失敗，請稍後再試。');}
+  }
   if(input==="指令文字")return createHelpText('common',now);
   if(input==="進階指令文字")return createHelpText('advanced',now);
   if(input==="管理指令文字")return createHelpText('admin',now);

@@ -1,0 +1,34 @@
+name: Audit current D1 isolated restoration
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['.github/workflows/audit-current-restore.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: audit-current-restore
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloudflare-migration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: python3 -m pip install boto3
+      - name: Restore and compare disposable clones only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: node scripts/verify-current-d1-restore.mjs

@@ -2,6 +2,7 @@ name = "hit2-boss-production"
 main = "src/production.js"
 compatibility_date = "2026-10-01"
 [vars]
+ENABLE_ADMIN_ACTOR_GUARD = "true"
 ENABLE_DISCORD_REMINDERS = "true"
 ENABLE_BIRTHDAY_SURPRISE = "false"
 ENABLE_OVERWRITE_GUARD = "true"

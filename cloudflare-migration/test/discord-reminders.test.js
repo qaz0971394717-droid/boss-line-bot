@@ -78,3 +78,17 @@ test('production forwards only the Discord binding and leaves LINE pushes disabl
  const health=await (await worker.fetch(new Request('https://prod.test'),configured)).json();
  assert.equal(health.discord_reminders_enabled,true);assert.equal(health.line_reminders_enabled,false);assert.equal(health.reminders_enabled,false);
 });
+test('manual sync is scoped to the requesting chat and disabled on staging',async()=>{
+ const {db,binding}=fixture(),{env,jobs}=service();
+ try{
+ db.exec("INSERT INTO boss_types VALUES('王h','王H',60)");
+ const insert=db.prepare('INSERT INTO boss_kills(chat_id,boss_key,boss_name,kill_time,respawn_time) VALUES(?,?,?,?,?)');
+ for(const chat of ['mapped','other'])insert.run(chat,'王h','王H','2026-10-17T00:00:00Z','2099-01-01T00:00:00Z');
+ const configured={...env,BOSS_DB:binding,DATABASE_BACKEND:'d1',STAGING_MODE:'true'};
+ const before=db.prepare('SELECT * FROM boss_kills ORDER BY chat_id').all();
+ assert.match((await handleLineCommand('同步提醒','mapped',configured)).text,/1 筆/);
+ assert.equal(jobs.size,1);assert.deepEqual(db.prepare('SELECT * FROM boss_kills ORDER BY chat_id').all(),before);
+ assert.match((await handleLineCommand('同步提醒','mapped',{...configured,PRODUCTION_MODE:'false'})).text,/未啟用/);
+ assert.equal(jobs.size,1);
+ }finally{db.close();}
+});

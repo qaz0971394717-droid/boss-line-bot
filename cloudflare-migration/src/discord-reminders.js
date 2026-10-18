@@ -15,9 +15,10 @@ export async function discordReminderRequest(env,path,payload){
  }catch{return {sent:false,reason:'discord-service-unavailable'};}
 }
 
-export async function syncFutureDiscordReminders(env,now=new Date()){
+export async function syncFutureDiscordReminders(env,now=new Date(),chatId=null){
  if(env.PRODUCTION_MODE!=='true'||env.ENABLE_DISCORD_REMINDERS!=='true'||!env.BOSS_DB?.prepare)throw Error('Production Discord sync disabled');
- const rows=(await env.BOSS_DB.prepare('SELECT chat_id,boss_key,boss_name,respawn_time FROM boss_kills WHERE respawn_time>? ORDER BY respawn_time LIMIT 101').bind(now.toISOString()).all()).results;
+ const query=chatId?'SELECT chat_id,boss_key,boss_name,respawn_time FROM boss_kills WHERE respawn_time>? AND chat_id=? ORDER BY respawn_time LIMIT 101':'SELECT chat_id,boss_key,boss_name,respawn_time FROM boss_kills WHERE respawn_time>? ORDER BY respawn_time LIMIT 101';
+ const rows=(await env.BOSS_DB.prepare(query).bind(...(chatId?[now.toISOString(),chatId]:[now.toISOString()])).all()).results;
  if(!rows||rows.length>100)throw Error('Sync batch exceeds safe limit');
  const totals={considered:rows.length,scheduled:0,skipped:0,failed:0,pending:0};
  for(let i=0;i<rows.length;i+=4){
