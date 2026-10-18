@@ -29,6 +29,8 @@ export const isGroupAccessCommand = input => {
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={}){
   const text=input.trim();
+  const stagingOnlyCommand=text==='授權群組數'||text==='撤銷本群授權';
+  if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   const groupChat=['group','room'].includes(context.sourceType);
   if(text==='授權群組數'){

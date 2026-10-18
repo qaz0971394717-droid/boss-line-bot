@@ -15,6 +15,7 @@ ENABLE_STAGING_REMINDERS = "false"
 DATABASE_BACKEND = "d1"
 ENABLE_EVENT_ORDER_GUARD = "true"
 ENABLE_GROUP_APPROVAL = "true"
+ENABLE_STAGING_GROUP_ACCESS_ADMIN = "true"
 [[d1_databases]]
 binding = "BOSS_DB"
 database_name = "hit2-boss-d1-staging-38984107626"

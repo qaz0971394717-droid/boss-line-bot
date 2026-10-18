@@ -9,7 +9,7 @@ function setup(){
  const db=new DatabaseSync(':memory:');
  db.exec('CREATE TABLE chat_settings(chat_id TEXT PRIMARY KEY,half_mode INTEGER NOT NULL DEFAULT 0); CREATE TABLE boss_kills(chat_id TEXT NOT NULL,boss_key TEXT NOT NULL,boss_name TEXT NOT NULL,kill_time TEXT,respawn_time TEXT,PRIMARY KEY(chat_id,boss_key));');
  for(const sql of GROUP_ACCESS_SCHEMA)db.exec(sql);
- const env={DATABASE_BACKEND:'d1',ENABLE_GROUP_APPROVAL:'true',ENABLE_ADMIN_ACTOR_GUARD:'true',ADMIN_PASSWORD:'owner-secret',BOSS_DB:{prepare(query){return {bind(...args){return {async all(){return {success:true,results:db.prepare(query).all(...args)}}}}}}}};
+ const env={DATABASE_BACKEND:'d1',ENABLE_GROUP_APPROVAL:'true',ENABLE_STAGING_GROUP_ACCESS_ADMIN:'true',ENABLE_ADMIN_ACTOR_GUARD:'true',ADMIN_PASSWORD:'owner-secret',BOSS_DB:{prepare(query){return {bind(...args){return {async all(){return {success:true,results:db.prepare(query).all(...args)}}}}}}}};
  return {db,env,sql:createSql(env)};
 }
 const now=new Date('2026-10-18T10:00:00Z');
@@ -73,6 +73,16 @@ test('group can query only the count of approved groups',async()=>{
   const reply=await processGroupAccessCommand('授權群組數',group,env,sql,now,{sourceType:'group',userId:'owner'});
   assert.match(reply.text,/目前已授權：2 個群組/);
   assert.doesNotMatch(reply.text,/approved-1|approved-2/);
+ }finally{db.close();}
+});
+
+test('authorization count and revoke commands are disabled outside staging opt-in',async()=>{
+ const {db,env,sql}=setup();try{
+  env.ENABLE_STAGING_GROUP_ACCESS_ADMIN='false';
+  assert.equal(await processGroupAccessCommand('授權群組數',group,env,sql,now,{sourceType:'group',userId:'owner'}),null);
+  assert.equal(await processGroupAccessCommand('撤銷本群授權',group,env,sql,now,{sourceType:'group',userId:'owner'}),null);
+  assert.equal(await shouldProcessCommand('授權群組數',group,env,{userId:'owner'}),false);
+  assert.equal(await shouldProcessCommand('撤銷本群授權',group,env,{userId:'owner'}),false);
  }finally{db.close();}
 });
 
