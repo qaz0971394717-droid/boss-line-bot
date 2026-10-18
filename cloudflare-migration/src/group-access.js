@@ -24,36 +24,37 @@ export const GROUP_ACCESS_SCHEMA = [
 
 export const isGroupAccessCommand = input => {
   const text=input.trim();
-  return text==='申請使用'||text==='授權群組數'||text==='撤銷本群授權'||/^授權群組\s+\S+$/.test(text);
+  return text==='申請使用'||text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={}){
   const text=input.trim();
-  const stagingOnlyCommand=text==='授權群組數'||text==='撤銷本群授權';
+  const stagingOnlyCommand=text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
-  const groupChat=['group','room'].includes(context.sourceType);
   if(text==='授權群組數'){
-    if(!groupChat)return response('ℹ️ 請在已授權的群組查詢。');
+    if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 查詢授權群組數。');
     const rows=await sql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
     return response(`📊 目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
   }
-  if(text==='撤銷本群授權'){
-    if(!groupChat||!context.userId)return response('❌ 請在群組內由管理者發起此操作。');
+  const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);
+  if(revoke){
+    if(!privateChat||!context.userId)return response('🔒 請在 HIT2 測試+異常提醒 的 1 對 1 私訊中撤銷群組授權。');
     if(!env.ADMIN_PASSWORD)return response('❌ 管理密碼尚未設定，無法移除授權。');
-    const rows=await sql`SELECT status FROM group_access WHERE chat_id=${chatId}`;
-    if(rows[0]?.status!=='approved')return response('ℹ️ 本群目前沒有有效授權。');
+    const target=revoke[1];
+    const rows=await sql`SELECT status FROM group_access WHERE chat_id=${target}`;
+    if(rows[0]?.status!=='approved')return response('ℹ️ 找不到這個已授權群組，或它已經停用。');
     await sql`INSERT INTO group_access_action_challenges(user_id,target_chat_id,action,expires_at)
-      VALUES(${context.userId},${chatId},'revoke',${new Date(now.getTime()+60000).toISOString()})
+      VALUES(${context.userId},${target},'revoke',${new Date(now.getTime()+60000).toISOString()})
       ON CONFLICT(user_id) DO UPDATE SET target_chat_id=EXCLUDED.target_chat_id,action=EXCLUDED.action,expires_at=EXCLUDED.expires_at`;
-    return response('🔐 已發起移除本群授權。請在 60 秒內私訊 BOSS Bot 輸入管理密碼；密碼不會顯示在群組。');
+    return response(`🔐 將移除群組 ${target} 的授權。請在 60 秒內於此私訊輸入管理密碼確認。`);
   }
   if(privateChat&&context.userId){
    const actionChallenge=await sql`SELECT target_chat_id,action,expires_at FROM group_access_action_challenges WHERE user_id=${context.userId}`;
    if(actionChallenge.length){
     await sql`DELETE FROM group_access_action_challenges WHERE user_id=${context.userId}`;
     const pending=actionChallenge[0];
-    if(new Date(pending.expires_at).getTime()<=now.getTime())return response('⏰ 操作驗證已逾時，請回群組重新輸入「撤銷本群授權」。');
+    if(new Date(pending.expires_at).getTime()<=now.getTime())return response('⏰ 操作驗證已逾時，請重新輸入「撤銷群組授權 群組ID」。');
     const enc=new TextEncoder();
     const [expected,actual]=await Promise.all([
       crypto.subtle.digest('SHA-256',enc.encode(env.ADMIN_PASSWORD||'')),
@@ -64,7 +65,7 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     if(!env.ADMIN_PASSWORD||diff!==0)return response('❌ 管理密碼錯誤，此次操作已取消。');
     const changed=await sql`UPDATE group_access SET status='denied' WHERE chat_id=${pending.target_chat_id} AND status='approved' RETURNING chat_id`;
     return changed.length
-      ? response(`✅ 已移除群組授權（${pending.target_chat_id}）。該群現在無法使用 BOSS Bot。`)
+      ? response(`✅ 已移除群組 ${pending.target_chat_id} 的授權。該群現在無法使用 BOSS Bot。`)
       : response('ℹ️ 該群組已沒有有效授權。');
    }
   }
@@ -115,6 +116,6 @@ export async function groupAccessReply(input,chatId,sourceType,env,sql,now=new D
     await sql`INSERT INTO group_access(chat_id,status,requested_at) VALUES(${chatId},'pending',${now.toISOString()})
       ON CONFLICT(chat_id) DO UPDATE SET status='pending',requested_at=excluded.requested_at WHERE group_access.status='denied'`;
   }
-  if(text!=='申請使用'&&text!=='授權群組數'&&text!=='撤銷本群授權'&&!/^(?:KB|王|BOSS|測試|TEST|HELP|指令|進階指令|管理指令|指令文字|進階指令文字|管理指令文字|群組ID|GROUPID|HALF(?:\s+(?:ON|OFF))?|清除KB|RESTART|同步提醒|王列表|BOSS列表|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王|授權群組)(?:\s|$)/i.test(text))return null;
+  if(text!=='申請使用'&&text!=='授權群組數'&&!/^撤銷群組授權(?:\s|$)/i.test(text)&&!/^(?:KB|王|BOSS|測試|TEST|HELP|指令|進階指令|管理指令|指令文字|進階指令文字|管理指令文字|群組ID|GROUPID|HALF(?:\s+(?:ON|OFF))?|清除KB|RESTART|同步提醒|王列表|BOSS列表|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王|授權群組)(?:\s|$)/i.test(text))return null;
   return response(`🔒 本群尚未授權使用 BOSS Bot。\n請輸入「申請使用」取得群組 ID，再傳給管理者核准。\n群組 ID：${chatId}`);
 }
