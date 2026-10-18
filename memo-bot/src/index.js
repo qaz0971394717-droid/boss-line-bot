@@ -1,3 +1,4 @@
+import {publicPage} from './public-pages.js';
 import {googleRoute} from './google.js';
 import {fetchLineReply} from './http.js';
 import {knownCommand,runCommand} from './commands.js';
@@ -11,6 +12,7 @@ const q=(db,sql,...p)=>db.prepare(sql).bind(...p);
 export function createWorker({fetcher=fetch}={}){return {
  async fetch(request,env,ctx){
   const path=new URL(request.url).pathname;
+  const publicResponse=publicPage(request);if(publicResponse)return publicResponse;
   const googleResponse=await googleRoute(request,env,fetcher);if(googleResponse)return googleResponse;
   if(request.method==='GET'&&path==='/')return json({service:'hongzhe-personal-memo',status:'ok',database_backend:'d1',owner_configured:/^U[a-f0-9]{32}$/i.test(env.OWNER_LINE_USER_ID||''),push_enabled:false});
   if(request.method!=='POST'||path!=='/callback')return new Response('Not Found',{status:404});

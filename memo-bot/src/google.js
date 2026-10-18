@@ -28,7 +28,7 @@ export async function linkCalendar(env,owner){
  const token=random();
  await q(env.MEMO_DB,'DELETE FROM google_tickets WHERE owner_id=?',owner).run();
  await q(env.MEMO_DB,'INSERT INTO google_tickets VALUES(?,?,?)',await digest(token),owner,Date.now()+600000).run();
- return {...message('請用手機 Chrome 開啟下方連結，登入你要使用的 Google 帳號。\n只授權這個程式建立的專用日曆；連結 10 分鐘內有效。'),quickReply:{items:[{type:'action',action:{type:'uri',label:'授權 Google 日曆',uri:origin+'/google/start?ticket='+token+'&openExternalBrowser=1'}}]}};
+ return {...message('請用手機 Chrome 開啟下方連結，登入你要使用的 Google 帳號。\n只授權這個程式建立的專用日曆；連結 10 分鐘內有效。\n隱私權政策：https://hongzhe-personal-memo.qaz0971394717.workers.dev/privacy'),quickReply:{items:[{type:'action',action:{type:'uri',label:'授權 Google 日曆',uri:origin+'/google/start?ticket='+token+'&openExternalBrowser=1'}}]}};
 }
 async function googleFetch(url,options={},fetcher=fetch){return fetchLineReply(url,options,fetcher,15000);}
 const tokenRequest=(env,params,fetcher)=>googleFetch('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:env.GOOGLE_CLIENT_ID,client_secret:env.GOOGLE_CLIENT_SECRET,...params}).toString()},fetcher);
