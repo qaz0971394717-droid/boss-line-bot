@@ -1,5 +1,5 @@
 {
-  "sha": "806f399743e5db6340a4f2a05d0979aa277373eb",
-  "acceptance": "User requested repeated migration audit and correction of omissions. Restore chat-scoped Discord sync and protect admin challenges by actor; 86 tests and staging deploy passed; LINE respawn push remains disabled.",
-  "tests": 86
+  "sha": "1150f1c85f87f9274f93da8eedd94888a60fd4bc",
+  "acceptance": "User requested correction of all migration audit findings. Signed production Discord KB route fails closed without original key/mapping; BOSS tests 88 plus operational alert tests 2 passed; staging, memo and two test LINE delivery checks passed. Preserve Discord reminders and disabled LINE respawn pushes.",
+  "tests": 88
 }
