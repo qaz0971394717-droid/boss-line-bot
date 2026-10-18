@@ -7,7 +7,7 @@ export async function cleanupMemo(env,now=new Date()){
  const result=await env.MEMO_DB.prepare(`UPDATE memo_items SET deleted_at=?,updated_at=?
  WHERE owner_id=? AND deleted_at IS NULL AND id IN (
  SELECT id FROM memo_items WHERE owner_id=? AND deleted_at IS NULL AND (
- (status='done' AND completed_at IS NOT NULL AND julianday(completed_at)<=julianday(?))
+ (kind IN ('task','reminder') AND status='done' AND completed_at IS NOT NULL AND julianday(completed_at)<=julianday(?))
  OR (kind='reminder' AND due_at IS NOT NULL AND julianday(due_at)<=julianday(?))
  ) ORDER BY id LIMIT 250) RETURNING id`).bind(stamp,stamp,env.OWNER_LINE_USER_ID,env.OWNER_LINE_USER_ID,cutoff,cutoff).all();
  if(!result.success)throw Error('Memo automatic cleanup failed');
