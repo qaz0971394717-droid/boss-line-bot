@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS memo_items (
  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','done')),
  created_at TEXT NOT NULL,
  updated_at TEXT NOT NULL,
+ completed_at TEXT,
  deleted_at TEXT,
  source_event TEXT NOT NULL UNIQUE
 );

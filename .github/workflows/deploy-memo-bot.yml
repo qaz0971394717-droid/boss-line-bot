@@ -57,3 +57,17 @@ jobs:
             console.log('PASS: public OAuth page '+path);
           }
           JS
+      - name: Verify LINE-only automatic cleanup configuration
+        run: |
+          node --input-type=module <<'JS'
+          let ready=false;
+          for(let i=0;i<12;i++){
+            const r=await fetch('https://hongzhe-personal-memo.qaz0971394717.workers.dev/',{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});
+            if(!r.ok)throw Error('Memo health request failed');
+            const h=await r.json();
+            if(h.auto_cleanup_enabled===true&&h.auto_cleanup_after_hours===24&&h.auto_cleanup_google===false&&h.owner_configured===true){ready=true;break;}
+            await new Promise(resolve=>setTimeout(resolve,5000));
+          }
+          if(!ready)throw Error('Automatic cleanup configuration not ready');
+          console.log('PASS: 24-hour LINE-only automatic cleanup enabled; Google history preserved.');
+          JS

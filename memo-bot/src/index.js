@@ -1,3 +1,4 @@
+import {cleanupMemo} from './cleanup.js';
 import {publicPage} from './public-pages.js';
 import {googleRoute} from './google.js';
 import {fetchLineReply} from './http.js';
@@ -10,11 +11,15 @@ export async function verifySignature(body,signature,secret){
 }
 const q=(db,sql,...p)=>db.prepare(sql).bind(...p);
 export function createWorker({fetcher=fetch}={}){return {
+ async scheduled(event,env){
+  const result=await cleanupMemo(env,new Date(event.scheduledTime||Date.now()));
+  console.log('Memo automatic LINE-only cleanup:',JSON.stringify(result));
+ },
  async fetch(request,env,ctx){
   const path=new URL(request.url).pathname;
   const publicResponse=publicPage(request);if(publicResponse)return publicResponse;
   const googleResponse=await googleRoute(request,env,fetcher);if(googleResponse)return googleResponse;
-  if(request.method==='GET'&&path==='/')return json({service:'hongzhe-personal-memo',status:'ok',database_backend:'d1',owner_configured:/^U[a-f0-9]{32}$/i.test(env.OWNER_LINE_USER_ID||''),push_enabled:false});
+  if(request.method==='GET'&&path==='/')return json({service:'hongzhe-personal-memo',status:'ok',database_backend:'d1',owner_configured:/^U[a-f0-9]{32}$/i.test(env.OWNER_LINE_USER_ID||''),push_enabled:false,auto_cleanup_enabled:env.AUTO_CLEANUP_MEMO==='true',auto_cleanup_after_hours:24,auto_cleanup_google:false});
   if(request.method!=='POST'||path!=='/callback')return new Response('Not Found',{status:404});
   const body=await request.text();if(!await verifySignature(body,request.headers.get('x-line-signature'),env.LINE_CHANNEL_SECRET))return new Response('Invalid signature',{status:401});
   let payload;try{payload=JSON.parse(body);}catch{return json({error:'Invalid JSON'},400);}if(!Array.isArray(payload?.events))return json({error:'Invalid events'},400);

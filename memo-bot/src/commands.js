@@ -98,7 +98,7 @@ export async function runCommand(input,{db,owner,eventId,now=new Date(),env={},f
    await query(db,'UPDATE memo_items SET deleted_at=?,updated_at=? WHERE owner_id=? AND id=? AND deleted_at IS NULL',now.toISOString(),now.toISOString(),owner,id).run();return text(`✅ 已刪除 #${id}。${item.due_at?'\n日曆行程保留。':''}`);
   }
   if(item.kind==='note')return text('這筆是備忘，無須標記完成。');
-  const status=verb==='完成'?'done':'pending';await query(db,'UPDATE memo_items SET status=?,updated_at=? WHERE owner_id=? AND id=?',status,now.toISOString(),owner,id).run();
+  const status=verb==='完成'?'done':'pending';await query(db,"UPDATE memo_items SET status=?,updated_at=?,completed_at=CASE WHEN ?='done' THEN COALESCE(completed_at,?) ELSE NULL END WHERE owner_id=? AND id=?",status,now.toISOString(),status,now.toISOString(),owner,id).run();
   return text(`✅ #${id} 已${status==='done'?'完成':'重新列入待辦'}。${item.due_at?'\n不會同步變更 Google 日曆。':''}`);
  }
  const list=input.match(/^(待辦|備忘列表)(?:\s+(\d+))?$/),search=input.match(/^查備忘\s+(.+)$/s);

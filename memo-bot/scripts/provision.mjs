@@ -22,5 +22,12 @@ if(!columns.some(c=>c.name==='notice_minutes')){
  const altered=await api('/d1/database/'+db.uuid+'/query',{sql:'ALTER TABLE memo_items ADD COLUMN notice_minutes INTEGER CHECK(notice_minutes BETWEEN 0 AND 10080)'});
  if(altered.some(row=>!row.success))throw Error('Notice setting schema preparation failed');
 }
-writeFileSync('wrangler.toml',`name = "hongzhe-personal-memo"\nmain = "src/index.js"\ncompatibility_date = "2026-10-01"\n[[d1_databases]]\nbinding = "MEMO_DB"\ndatabase_name = "hongzhe-personal-memo"\ndatabase_id = "${db.uuid}"\n`);
+if(!columns.some(c=>c.name==='completed_at')){
+ const altered=await api('/d1/database/'+db.uuid+'/query',{sql:'ALTER TABLE memo_items ADD COLUMN completed_at TEXT'});
+ if(altered.some(row=>!row.success))throw Error('Completion timestamp schema preparation failed');
+}
+// Existing completed records have only updated_at as their historical completion proxy.
+const initialized=await api('/d1/database/'+db.uuid+'/query',{sql:"UPDATE memo_items SET completed_at=updated_at WHERE status='done' AND completed_at IS NULL; CREATE INDEX IF NOT EXISTS memo_cleanup_done ON memo_items(owner_id,deleted_at,status,completed_at); CREATE INDEX IF NOT EXISTS memo_cleanup_due ON memo_items(owner_id,deleted_at,kind,due_at);"});
+if(initialized.some(row=>!row.success))throw Error('Memo cleanup schema preparation failed');
+writeFileSync('wrangler.toml',`name = "hongzhe-personal-memo"\nmain = "src/index.js"\ncompatibility_date = "2026-10-01"\n[vars]\nAUTO_CLEANUP_MEMO = "true"\n[triggers]\ncrons = ["7 * * * *"]\n[[d1_databases]]\nbinding = "MEMO_DB"\ndatabase_name = "hongzhe-personal-memo"\ndatabase_id = "${db.uuid}"\n`);
 console.log('Memo isolated D1 ready. Existing bot databases were not changed.');
