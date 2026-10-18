@@ -86,7 +86,7 @@ async function runLineCommand(command, chatId, env, now=new Date(), context={}) 
       const result=await stagingReminderRequest(env, "/cancel", cancelPayload(chatId, item.boss_name));
       if(reminderWarning(env,result,"取消"))warnings.push(item.boss_name);
     }
-    return textMessage(`✅ 已清除本群 ${deleted.length} 筆KB紀錄。`);
+    return textMessage(`✅ 已清除本群 ${deleted.length} 筆KB紀錄。`+(warnings.length?'\n⚠️ 部分提醒取消失敗，請留意舊提醒。':''));
   }
   if(input==="王列表"||upper==="BOSS列表"){
     const rows=await sql`SELECT boss_name,minutes FROM boss_types ORDER BY minutes ASC,boss_name ASC`;

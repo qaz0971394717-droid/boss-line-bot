@@ -1,3 +1,4 @@
+import {stagingReminderRequest,reminderPayload,cancelPayload,reminderWarning} from './reminders.js';
 // D1 batches make each mutation and its undo snapshot one transaction.
 export const UNDO_SCHEMA=[
  'CREATE TABLE IF NOT EXISTS boss_revisions(chat_id TEXT NOT NULL,boss_key TEXT NOT NULL,version INTEGER NOT NULL,PRIMARY KEY(chat_id,boss_key))',
@@ -59,5 +60,15 @@ export async function undoLast(env,chat,user,expectedOperation){
  queries.push(q('DELETE FROM undo_entries WHERE chat_id=? AND user_id=? AND operation_id=? AND EXISTS(SELECT 1 FROM undo_attempts WHERE id=?)',chat,user,op,attempt));
  queries.push(q('DELETE FROM undo_attempts WHERE id=? RETURNING id',attempt));
  const result=await db.batch(queries);
- return msg(result.at(-1).results.length?`✅ 已復原你上一筆操作（${entries.length} 隻王）。`:'紀錄已有後續變更，未復原。');
+ if(!result.at(-1).results.length)return msg('紀錄已有後續變更，未復原。');
+ let warning='';
+ if(env.PRODUCTION_MODE==='true'&&env.ENABLE_DISCORD_REMINDERS==='true'){
+  for(const entry of entries){
+   const current=await q('SELECT boss_name,respawn_time FROM boss_kills WHERE chat_id=? AND boss_key=?',chat,entry.boss_key).all();
+   const row=current.results[0];
+   const sent=await stagingReminderRequest(env,row?'/schedule':'/cancel',row?reminderPayload(chat,row.boss_name,row.respawn_time):cancelPayload(chat,entry.boss_key));
+   warning ||= reminderWarning(env,sent,'更新');
+  }
+ }
+ return msg(`✅ 已復原你上一筆操作（${entries.length} 隻王）。`+warning);
 }

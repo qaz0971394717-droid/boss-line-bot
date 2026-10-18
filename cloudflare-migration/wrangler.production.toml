@@ -2,6 +2,7 @@ name = "hit2-boss-production"
 main = "src/production.js"
 compatibility_date = "2026-10-01"
 [vars]
+ENABLE_DISCORD_REMINDERS = "true"
 ENABLE_BIRTHDAY_SURPRISE = "false"
 ENABLE_OVERWRITE_GUARD = "true"
 ENABLE_UNDO_BUTTON = "true"
@@ -15,3 +16,8 @@ ENABLE_EVENT_ORDER_GUARD = "true"
 binding = "BOSS_DB"
 database_name = "hit2-boss-d1-production-38984686581"
 database_id = "db692969-0b74-4dc5-952a-604847e15628"
+
+[[durable_objects.bindings]]
+name = "DISCORD_REMINDER"
+class_name = "BossReminder"
+script_name = "hit2-boss-reminder-v2"

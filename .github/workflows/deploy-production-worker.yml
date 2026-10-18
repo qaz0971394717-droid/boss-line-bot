@@ -26,7 +26,7 @@ jobs:
         id: release
         working-directory: .
         run: |
-          node -e 'const fs=require("fs");const release=JSON.parse(fs.readFileSync(".github/production-release.json","utf8"));if(!/^[a-f0-9]{40}$/.test(release.sha))throw Error("Approved release SHA missing");fs.appendFileSync(process.env.GITHUB_OUTPUT,"sha="+release.sha+String.fromCharCode(10))'
+          node -e 'const fs=require("fs");const release=JSON.parse(fs.readFileSync(".github/production-release.json","utf8"));if(!/^[a-f0-9]{40}$/.test(release.sha))throw Error("Approved release SHA missing");fs.appendFileSync(process.env.GITHUB_OUTPUT,"sha="+release.sha+String.fromCharCode(10)+"sync_discord="+(release.sync_discord_reminders===true)+String.fromCharCode(10))'
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.release.outputs.sha }}
@@ -72,5 +72,13 @@ jobs:
             if (health.mode !== "production" || health.database_backend !== "d1" || !health.line_enabled || !health.admin_enabled || health.reminders_enabled !== false) {
               throw new Error("Production configuration verification failed");
             }
-            console.log("Production Worker health verified; automatic reminders disabled.");
+            if(health.discord_reminders_enabled!==true||health.line_reminders_enabled!==false)throw new Error("Discord reminder configuration verification failed");
+            console.log("Production Worker health verified; Discord reminders enabled, LINE push disabled.");
           '
+
+      - name: Restore existing future Discord reminder schedules
+        if: steps.release.outputs.sync_discord == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/sync-discord-reminders.mjs

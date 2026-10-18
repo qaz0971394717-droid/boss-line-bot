@@ -1,5 +1,30 @@
 > Current production uses Cloudflare D1 via wrangler.production.toml. Neon and Render hold historical data only. Do not revert to them without reconciling new D1 writes. See [D1-MIGRATION.md](D1-MIGRATION.md) for the completed cutover and current recovery procedure. Instructions below are retained as historical context.
 
+## Current Discord reminders (restored 2026-10-18)
+
+Production has ENABLE_DISCORD_REMINDERS=true and a cross-script DISCORD_REMINDER
+binding to BossReminder in the existing hit2-boss-reminder-v2 Worker. That Worker
+is unchanged: its existing secret group mapping and Discord webhook remain the
+only destination, with 5-minute and 1-minute reminders. LINE automatic pushes
+stay disabled. Staging cannot call this production binding. No reminder API key
+or Discord webhook is copied into the LINE Worker.
+
+K/card K, respawn edits, cancellations, confirmed clears, administrator deletion
+and undo propagate schedule/cancel operations to the same Durable Object IDs.
+Unmapped groups intentionally skip reminders; transport failure adds a brief
+warning to the command reply. Production health exposes separate
+discord_reminders_enabled and line_reminders_enabled flags; reminders_enabled
+stays false for compatibility with the legacy LINE-push check.
+
+An approved release may set sync_discord_reminders=true in
+.github/production-release.json. After deployment and health verification, a
+short-lived authenticated Worker reads up to 100 future production records and
+reschedules through the same mapped Discord objects. It never edits BOSS data,
+uses no LINE push transport, logs aggregate counts only, and is removed in a
+finally block. Only pending future 5/1-minute offsets are scheduled by the
+original reminder service; expired reminders are not replayed. Leave the release
+flag absent for ordinary later deployments.
+
 # Production deployment
 
 Staging remains on `wrangler.toml`; production uses `wrangler.production.toml`
@@ -22,8 +47,9 @@ and the separate Worker `hit2-boss-production`.
    Never paste secret values in chat or commit them.
 
 The production entry point accepts no staging credential fallback. Its explicit
-adapter reuses the tested command engine and always disables reminders and
-Discord, regardless of supplied variables. Health flags report configuration
+adapter reuses the tested command engine and always disables LINE push reminders
+and Discord interaction routes. Discord reminder scheduling is controlled by the
+separate production-only binding documented above. Health flags report configuration
 intent; they do not prove database or LINE connectivity.
 
 ## Cutover and rollback
@@ -43,4 +69,4 @@ webhook rollback preserves commands recorded since cutover. Do not restore an
 older database snapshot just to roll back code.
 
 Keep the old Render deployment, backup branch, and staging Worker available
-until production verification is complete. Do not enable automatic reminders.
+until production verification is complete. Do not enable automatic LINE push reminders.
