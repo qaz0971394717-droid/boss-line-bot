@@ -16,10 +16,10 @@ Scope: legacy feature parity, deployed Cloudflare configuration, cross-group saf
 
 ## Known remaining gaps / verification limits
 
-1. Discord slash command `/kb`: the production adapter currently exposes LINE /callback but does not enable /discord/interactions. Original DISCORD_PUBLIC_KEY, fixed LINE chat mapping and Discord application endpoint settings must be verified before enabling this route. Discord reminder repair does not establish slash-command migration.
-2. Google Calendar OAuth publication: app configuration being External + Testing has not been verified or ruled out. That mode may expire refresh tokens after seven days. Do not claim permanent authorization until Google Auth Platform publication status is checked. Never replace GOOGLE_TOKEN_KEY; restored encrypted tokens require the original key or user reauthorization.
-3. Alert coverage: BOSS production/staging backup/capacity incidents use the already-bound test LINE bot relay. Personal memo and newly added parts backup/capacity incidents currently create/update GitHub issues only; LINE relay currently accepts only production/staging. Do not claim all services notify LINE.
-4. Legacy parts Python CI still reports two failures (hard-coded old version expectation and an 800W wattage assertion). Active Cloudflare migration tests and deployment at fd57e0ac3f06e94c191eab4b8aa57d08fd8cf586 passed. Legacy test failures are not evidence the active Worker is down, but should be resolved or retired deliberately.
+1. Discord slash command `/kb`: CORRECTION RELEASED at source 1150f1c85f87f9274f93da8eedd94888a60fd4bc. Production route now verifies the original application signature and reads only its configured LINE group; missing key/mapping fails closed. Actual deployment readiness returned discord_kb_configured=false. The original Discord public key, fixed group mapping and application Interaction Endpoint setting are still needed to complete activation.
+2. Google Calendar OAuth publication: still blocked. The direct Google Cloud audience settings page in this cloud browser returns Site Unavailable / Unable to access this site, so publication status cannot be read or changed here. External + Testing has not been verified or ruled out; that mode may expire refresh tokens after seven days. The owner must verify Google Auth Platform publication status in an accessible account session. GOOGLE_TOKEN_KEY was not changed.
+3. Alert coverage: RESOLVED. Memo and parts backup/capacity incidents now reuse the existing bound test LINE destination. A GitHub incident is persisted first; failed delivery is retried under the same incident ID; repeated failures do not spam; recovery notifies once before closing the incident. Actual memo and parts integration test pushes were accepted by LINE in run 39091844242. Both daily backups reran successfully (39091854423, 39091854404).
+4. Legacy parts Python CI: RESOLVED in commit 993cae1c10d8a42d5cc313aa5b4d514b54505c51. Fixed structured fields at position zero (e.g. power wattage without base specs), including editor updates; version assertion follows the current application version. All 32 Python tests passed in 39091804984. Cloudflare tests also passed (39091807415); active Worker did not need redeployment for legacy-only fixes.
 5. A successful daily backup is a tested recovery point, not zero-data-loss protection; changes after that backup may need replay. GitHub cron start times are approximate. Workers/D1 health flags verify configuration, not a newly sent real LINE/Discord interaction.
 6. The direct local HTTP health sweep could not yet establish network connectivity from this sandbox; production deploy's Cloudflare-side health check did succeed. Do not interpret local network timeout as service outage.
 
@@ -29,3 +29,11 @@ Scope: legacy feature parity, deployed Cloudflare configuration, cross-group saf
 - Isolated restoration: https://github.com/qaz0971394717-droid/boss-line-bot/actions/runs/39091411392
 - Parts verified backup: https://github.com/qaz0971394717-droid/boss-line-bot/actions/runs/39091430878
 - Existing backups: production 39070172891; staging 39071705197; memo 39072660069.
+
+## Correction release verified at 10:57 Taipei
+
+- BOSS source: 1150f1c85f87f9274f93da8eedd94888a60fd4bc.
+- 88 BOSS tests plus 2 notification incident/retry tests passed. Staging, memo and production deployments succeeded.
+- Production run: https://github.com/qaz0971394717-droid/boss-line-bot/actions/runs/39091878368 ; Worker version 09163ea4-ae77-491c-8b17-e2659130b0ab.
+- Production health confirmed Discord reminders enabled and LINE respawn pushes disabled. Discord `/kb` activation remains incomplete as documented above.
+- Scheduled memo and parts workflows on main now load the existing private notification key and use the corrected incident handlers. No notification destination changed and no credentials are printed.
