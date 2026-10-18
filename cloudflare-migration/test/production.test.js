@@ -29,6 +29,16 @@ test('production adapter uses production database and blocks reminder and Discor
   assert.equal(health.reminders_enabled,false);
 });
 
+test('production exposes and forwards the explicit group approval gate',async()=>{
+ let received;
+ const worker=createProductionWorker({worker:{fetch(_request,env){received=env;return new Response('ok');}}});
+ const env={...credentials,ENABLE_GROUP_APPROVAL:'true'};
+ await worker.fetch(new Request('https://bot.test/callback',{method:'POST'}),env);
+ assert.equal(received.ENABLE_GROUP_APPROVAL,'true');
+ const health=await (await worker.fetch(new Request('https://bot.test/'),env)).json();
+ assert.equal(health.group_approval_enabled,true);
+});
+
 test('production forwards the original execution context to preserve webhook lifetime', async () => {
   const ctx = { waitUntil() {} };
   let received;

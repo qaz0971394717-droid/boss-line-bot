@@ -8,6 +8,7 @@ import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
 import { fetchWithTimeout } from "./http.js";
 import { createEventStore } from "./events.js";
+import { groupAccessReply } from "./group-access.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const bytes = (s) => new TextEncoder().encode(s);
@@ -66,7 +67,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
     if(ops)return ops;
     const maintenance = await migrationGate(request, env);
     if (maintenance) return maintenance;
-    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", database_backend: env.DATABASE_BACKEND === "d1" ? "d1" : "neon", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true" });
+    if (url.pathname === "/" && request.method === "GET") return json({ service: "hit2-boss-staging", mode: "staging", database_backend: env.DATABASE_BACKEND === "d1" ? "d1" : "neon", status: "ok", line_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_LINE === "true", admin_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_ADMIN === "true", reminders_enabled: env.STAGING_MODE === "true" && env.ENABLE_STAGING_REMINDERS === "true", group_approval_enabled: env.STAGING_MODE === "true" && env.ENABLE_GROUP_APPROVAL === "true" });
     if (url.pathname === "/callback" && request.method === "POST") {
       const body = await request.text();
       if (!await verifyLineSignature(body, request.headers.get("x-line-signature"), env.LINE_CHANNEL_SECRET)) return new Response("Invalid signature", { status: 401 });
@@ -92,7 +93,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
         let stage = "event-validation";
         try {
           if (typeof event.webhookEventId !== "string" || !event.webhookEventId) throw new Error("Missing event identifier");
-          const context={undoOperationId:event.type==='postback'&&event.postback?.data?.startsWith('undo:')?event.postback.data.slice(5):undefined,userId:event.source?.userId,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
+          const context={undoOperationId:event.type==='postback'&&event.postback?.data?.startsWith('undo:')?event.postback.data.slice(5):undefined,userId:event.source?.userId,sourceType:event.source?.type,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
           stage = "command-filter";
           if(commandHandler===handleLineCommand&&!await shouldProcessCommand(command,chatId,env,context))continue;
           stage = "database-client";
@@ -102,7 +103,9 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           if (claim.state === "done") { outcomes.push("ok"); continue; }
           if (claim.state === "pending") throw new Error("Event requires reconciliation");
           stage = "command";
-          const reply = claim.state === "ready" ? claim.reply : (await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
+          const accessReply=env.ENABLE_GROUP_APPROVAL==='true'&&commandHandler===handleLineCommand
+            ? await groupAccessReply(command,chatId,event.source?.type,env,createSql(env),new Date(context.eventTimestamp)) : null;
+          const reply = claim.state === "ready" ? claim.reply : (accessReply || await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
           if(!reply){await eventStore.delivered(event.webhookEventId);outcomes.push('ok');continue;}

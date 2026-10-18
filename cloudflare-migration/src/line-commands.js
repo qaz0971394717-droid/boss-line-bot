@@ -3,6 +3,7 @@ import {BIRTHDAY_COMMAND,birthdayEnabled,birthdayGreeting,addBirthdayButton} fro
 import {checkOverwrite,consumeOverwrite} from './overwrite-guard.js';
 import {undoEnvironment} from './undo.js';
 import {undoLast} from './undo.js';
+import {processGroupAccessCommand} from './group-access.js';
 import {createHelpFlex,createHelpText} from './help-flex.js';
 // Staging-only LINE command engine. No production webhook is routed here yet.
 // All database writes require an isolated STAGING_DATABASE_URL.
@@ -33,6 +34,10 @@ export function parseRespawnTime(day,clock) {
 }
 
 export async function handleLineCommand(command, chatId, env, now=new Date(), context={}) {
+ if(env.ENABLE_GROUP_APPROVAL==='true'){
+  const accessReply=await processGroupAccessCommand(command,chatId,env,createSql(env),now,context);
+  if(accessReply)return accessReply;
+ }
  if(command.trim()===BIRTHDAY_COMMAND)return birthdayEnabled(env,chatId)?birthdayGreeting():null;
  const confirmation=await consumeOverwrite(command,chatId,env,context.userId);
  if(confirmation?.reply)return confirmation.reply;

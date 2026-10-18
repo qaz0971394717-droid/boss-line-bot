@@ -14,6 +14,7 @@ export function createProductionWorker({ worker = createWorker(), migrationHandl
       if (url.pathname === '/' && request.method === 'GET') {
         return Response.json({ service: 'hit2-boss-production', mode: 'production', database_backend: env.DATABASE_BACKEND === 'd1' ? 'd1' : 'neon', status: 'ok',
           line_enabled: enabled, admin_enabled: enabled && env.ENABLE_ADMIN === 'true', reminders_enabled: false,
+          group_approval_enabled: enabled && env.ENABLE_GROUP_APPROVAL === 'true',
           discord_kb_enabled: discordReady, line_reminders_enabled: false, discord_reminders_enabled: enabled && env.ENABLE_DISCORD_REMINDERS === 'true' && Boolean(env.DISCORD_REMINDER?.get) });
       }
       if(url.pathname==='/discord/interactions'&&request.method==='POST'&&env.PRODUCTION_MODE==='true'&&env.ENABLE_DISCORD_KB==='true'){
@@ -35,6 +36,7 @@ export function createProductionWorker({ worker = createWorker(), migrationHandl
         ENABLE_OVERWRITE_GUARD: env.ENABLE_OVERWRITE_GUARD,
         ENABLE_UNDO_BUTTON: env.ENABLE_UNDO_BUTTON,
         ENABLE_EVENT_ORDER_GUARD: env.ENABLE_EVENT_ORDER_GUARD,
+        ENABLE_GROUP_APPROVAL: env.ENABLE_GROUP_APPROVAL,
         BOSS_DB: env.DATABASE_BACKEND === 'd1' ? env.BOSS_DB : undefined,
         ENABLE_STAGING_LINE: 'true',
         STAGING_DATABASE_URL: env.DATABASE_URL,

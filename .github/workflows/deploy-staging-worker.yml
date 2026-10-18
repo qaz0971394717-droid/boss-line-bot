@@ -39,6 +39,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           python3 scripts/ops-alert-key.py
+          node scripts/prepare-group-access.mjs staging
           node scripts/prepare-undo.mjs
       - name: Deploy staging D1 configuration
         env:
