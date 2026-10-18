@@ -13,7 +13,7 @@ def api(path):
 def scrub(text):
  for value in [token,account,*[os.environ.get(k,"") for k in ["R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_ENDPOINT"]]]:
   if value:text=text.replace(value,"[secret]")
- text=re.sub(r"https?://[^\\s\\\"'<>]+",lambda m:"https://"+urllib.parse.urlparse(m[0]).hostname+"/[redacted]",text)
+ text=re.sub(r"https?://[^\s\"'<>]+",lambda m:"https://"+urllib.parse.urlparse(m[0]).hostname+"/[redacted]",text)
  text=re.sub(r"(?<![A-Za-z0-9_])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_])","[long-literal-redacted]",text)
  return text
 for worker in ["hit2-boss-production","hit2-boss-reminder","hit2-boss-reminder-v2"]:
@@ -25,7 +25,7 @@ for worker in ["hit2-boss-production","hit2-boss-reminder","hit2-boss-reminder-v
   if worker=="hit2-boss-production":continue
   mime,raw=get("/workers/scripts/"+worker)
   if mime.startswith("multipart/"):
-   msg=email.message_from_bytes(("Content-Type: "+mime+"\\r\\nMIME-Version: 1.0\\r\\n\\r\\n").encode()+raw)
+   msg=email.message_from_bytes(("Content-Type: "+mime+"\r\nMIME-Version: 1.0\r\n\r\n").encode()+raw)
    modules=[(part.get_filename(),part.get_payload(decode=True).decode("utf-8")) for part in msg.walk() if part.get_content_maintype()!="multipart" and part.get_payload(decode=True)]
   else:modules=[("worker.js",raw.decode("utf-8"))]
   for name,source in modules:
