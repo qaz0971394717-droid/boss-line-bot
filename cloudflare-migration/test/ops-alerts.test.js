@@ -7,3 +7,13 @@ const payload={target:'production',kind:'alert',message:'備份未成功',retryK
 const req=(auth='private')=>new Request('https://test/ops/notify',{method:'POST',headers:{authorization:'Bearer '+auth,'Content-Type':'application/json'},body:JSON.stringify(payload)});
 test('LINE alerts reject unauthorized access, require explicit existing-chat binding and cannot be redirected',async()=>{const {db,env}=fixture();try{assert.equal((await opsRoute(req('wrong'),env)).status,401);assert.equal((await opsRoute(req(),env)).status,409);assert.match((await bindAlerts('啟用異常通知','stranger',env)).text,/既有/);assert.match((await bindAlerts('啟用異常通知','test-group',env)).text,/已綁定/);db.exec("INSERT INTO chat_settings VALUES('other')");assert.match((await bindAlerts('啟用異常通知','other',env)).text,/已有/);assert.equal(db.prepare('SELECT chat_id FROM ops_destination').get().chat_id,'test-group');}finally{db.close();}});
 test('LINE pushes go only to bound test chat; duplicate incidents never push twice',async()=>{const {db,env}=fixture();try{await bindAlerts('啟用異常通知','test-group',env);let calls=0;const send=async(url,options)=>{calls++;const body=JSON.parse(options.body);assert.equal(body.to,'test-group');assert.match(body.messages[0].text,/正式版.*備份未成功/);assert.equal(options.headers['X-Line-Retry-Key'],payload.retryKey);return new Response('{}');};assert.equal((await opsRoute(req(),env,send)).status,200);assert.equal((await opsRoute(req(),env,send)).status,200);assert.equal(calls,1);assert.equal((await opsRoute(req(),{...env,ENABLE_OPS_ALERTS:undefined},send)).status,404);}finally{db.close();}});
+test('memo and parts alerts reuse only the existing bound test conversation',async()=>{
+ const {db,env}=fixture();try{
+ await bindAlerts('啟用異常通知','test-group',env);
+ for(const [i,target,label] of [[2,'memo','備忘錄'],[3,'parts','零件查詢']]){
+  const p={...payload,target,retryKey:`${i}1111111-1111-4111-a111-111111111111`,to:'attacker'};
+  const request=new Request('https://test/ops/notify',{method:'POST',headers:{authorization:'Bearer private'},body:JSON.stringify(p)});
+  assert.equal((await opsRoute(request,env,async(_url,o)=>{const body=JSON.parse(o.body);assert.equal(body.to,'test-group');assert.match(body.messages[0].text,new RegExp(label));return new Response('{}');})).status,200);
+ }
+ }finally{db.close();}
+});

@@ -19,12 +19,13 @@ export async function opsRoute(request,env,fetcher=fetch){
  const a=await digest(provided),b=await digest(`Bearer ${env.OPS_ALERT_KEY}`);let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
  if(diff||request.method!=='POST')return new Response('Unauthorized',{status:401});
  let p;try{p=await request.json();}catch{return new Response('Invalid',{status:400});}
- if(!/^(production|staging)$/.test(p.target)||!['alert','recovery'].includes(p.kind))return new Response('Invalid',{status:400});
+ if(!/^(production|staging|memo|parts)$/.test(p.target)||!['alert','recovery'].includes(p.kind))return new Response('Invalid',{status:400});
  const destination=await env.BOSS_DB.prepare('SELECT chat_id FROM ops_destination WHERE id=1').first();
  if(!destination)return new Response('Destination not bound',{status:409});
  const retryKey=typeof p.retryKey==='string'&&/^[0-9a-f-]{36}$/.test(p.retryKey)?p.retryKey:null;
  if(!retryKey)return new Response('Invalid retry key',{status:400});
- const text=p.kind==='recovery'?`✅ ${p.target==='production'?'正式版':'測試版'}資料庫警示已解除。`:`⚠️ ${p.target==='production'?'正式版':'測試版'}：${String(p.message||'維護檢查失敗').slice(0,220)}\n請查看 GitHub Actions。`;
+ const label={production:'正式版',staging:'測試版',memo:'備忘錄',parts:'零件查詢'}[p.target];
+ const text=p.kind==='recovery'?`✅ ${label}資料庫警示已解除。`:`⚠️ ${label}：${String(p.message||'維護檢查失敗').slice(0,220)}\n請查看 GitHub Actions。`;
  const previous=await env.BOSS_DB.prepare('SELECT status,created_at FROM ops_deliveries WHERE id=?').bind(retryKey).first();
  if(previous?.status!=='sent'&&previous&&Date.now()-previous.created_at>23*3600000)return new Response('Manual reconciliation required',{status:503});
  const now=Date.now();

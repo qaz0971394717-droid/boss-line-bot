@@ -27,6 +27,7 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm test
+      - run: node --test ../scripts/service-backup-status.test.mjs
       - run: pip install boto3
       - name: Prepare private LINE notification relay
         env:
