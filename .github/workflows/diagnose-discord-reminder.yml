@@ -1,0 +1,19 @@
+name: Diagnose existing Discord reminder
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['scripts/diagnose-discord-reminder.py', '.github/workflows/diagnose-discord-reminder.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect existing reminder worker configuration without sending messages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 scripts/diagnose-discord-reminder.py
