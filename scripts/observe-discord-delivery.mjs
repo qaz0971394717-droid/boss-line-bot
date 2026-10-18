@@ -31,9 +31,11 @@ try{
   socket.onerror=()=>{clearTimeout(timer);reject(Error('Reminder log connection failed'));};
  });
  console.log('DISCORD_DELIVERY_OBSERVATION '+JSON.stringify(result));
+}catch(error){
+ process.exitCode=1;console.error('Reminder observation failed:',error.name);
 }finally{
  try{socket?.close();}catch{}
- await api(root+'/'+tail.id,'DELETE');
- console.log('Reminder observation session removed.');
- process.exit(0);
+ try{await api(root+'/'+tail.id,'DELETE');console.log('Reminder observation session removed.');}
+ catch{process.exitCode=1;console.error('Reminder observation cleanup failed.');}
+ process.exit(process.exitCode||0);
 }
