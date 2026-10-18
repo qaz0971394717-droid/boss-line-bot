@@ -52,7 +52,7 @@ def inventory():
   size=db.get("file_size")
   if size is None:
    details,_=rest("/d1/database/"+db["uuid"]);size=details.get("file_size")
-  output.append({"name":db.get("name"),"bytes":size})
+  output.append({"name":db.get("name"),"id":db.get("uuid"),"bytes":size})
  emit("d1_storage",status="ok",databases=output,total_bytes=sum(int(d["bytes"] or 0) for d in output),all_sizes_known=all(d["bytes"] is not None for d in output))
  workers,_=rest("/workers/scripts")
  emit("workers_inventory",status="ok",scripts=[w.get("id") for w in workers])
@@ -67,7 +67,7 @@ def worker_day(day):
  node="workersInvocationsAdaptive(limit:1000,filter:{datetime_geq:"+json.dumps(iso(start))+",datetime_leq:"+json.dumps(iso(end))+"}){dimensions{scriptName} sum{requests errors subrequests}}"
  rows=gql(node)["workersInvocationsAdaptive"]
  emit("workers_day",status="ok",date_utc=str(day),start_utc=iso(start),end_utc=iso(end),rows=rows,total_requests=sum(r.get("sum",{}).get("requests",0) for r in rows),total_errors=sum(r.get("sum",{}).get("errors",0) for r in rows),row_limit_reached=len(rows)>=1000)
-for days in range(2,-1,-1):
+for days in range(now.day-1,-1,-1):
  day=now.date()-datetime.timedelta(days=days)
  attempt("workers_day_"+str(day),lambda day=day:worker_day(day))
 def d1_usage():
@@ -80,6 +80,18 @@ def d1_usage():
   for metric in sums:sums[metric]+=row.get("sum",{}).get(metric,0)
  emit("d1_usage",status="ok",start_date_utc=start,end_date_utc=end,daily=daily,per_database=rows,row_limit_reached=len(rows)>=10000)
 attempt("d1_usage",d1_usage)
+
+def d1_query_usage():
+ start=now.replace(day=1).date().isoformat();end=now.date().isoformat()
+ node="d1QueriesAdaptiveGroups(limit:10000,filter:{date_geq:"+json.dumps(start)+",date_leq:"+json.dumps(end)+"}){dimensions{date databaseId} sum{rowsRead rowsWritten}}"
+ rows=gql(node)["d1QueriesAdaptiveGroups"]
+ daily={}
+ for row in rows:
+  date=row["dimensions"]["date"];sums=daily.setdefault(date,{"rowsRead":0,"rowsWritten":0})
+  for metric in sums:sums[metric]+=row.get("sum",{}).get(metric,0)
+ emit("d1_query_usage_crosscheck",status="ok",daily=daily,per_database=rows,row_limit_reached=len(rows)>=10000)
+attempt("d1_query_usage_crosscheck",d1_query_usage)
+
 def r2_operations():
  start=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
  node="r2OperationsAdaptiveGroups(limit:10000,filter:{datetime_geq:"+json.dumps(iso(start))+",datetime_leq:"+json.dumps(iso(now))+"}){dimensions{bucketName actionType actionStatus} sum{requests}}"
