@@ -1,5 +1,6 @@
 {
-  "sha": "56d44330972989ab555a8b35d4fffbf4a5295854",
-  "acceptance": "User requested removal of the completed birthday surprise on 2026-10-17 Asia/Taipei",
-  "tests": 79
+  "sha": "37068fb076b90aeb381309a86a04412b65367b36",
+  "acceptance": "User reported broken existing Discord reminders and requested restoration; preserve LINE push disabled, original Discord mapping and reminder Worker on 2026-10-18 Asia/Taipei",
+  "tests": 84,
+  "sync_discord_reminders": true
 }
