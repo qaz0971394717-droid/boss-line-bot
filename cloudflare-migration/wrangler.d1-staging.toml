@@ -20,3 +20,8 @@ ENABLE_STAGING_GROUP_ACCESS_ADMIN = "true"
 binding = "BOSS_DB"
 database_name = "hit2-boss-d1-staging-38984107626"
 database_id = "dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5"
+
+[[d1_databases]]
+binding = "PRODUCTION_BOSS_DB"
+database_name = "hit2-boss-d1-production-38984686581"
+database_id = "db692969-0b74-4dc5-952a-604847e15628"

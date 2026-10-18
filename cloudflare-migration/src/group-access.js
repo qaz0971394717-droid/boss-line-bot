@@ -27,22 +27,24 @@ export const isGroupAccessCommand = input => {
   return text==='申請使用'||text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
-export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={}){
+export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={},managementSql=null){
   const text=input.trim();
   const stagingOnlyCommand=text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   if(text==='授權群組數'){
     if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 查詢授權群組數。');
-    const rows=await sql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
-    return response(`📊 目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
+    if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
+    const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
+    return response(`📊 正式版目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
   }
   const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);
   if(revoke){
     if(!privateChat||!context.userId)return response('🔒 請在 HIT2 測試+異常提醒 的 1 對 1 私訊中撤銷群組授權。');
     if(!env.ADMIN_PASSWORD)return response('❌ 管理密碼尚未設定，無法移除授權。');
     const target=revoke[1];
-    const rows=await sql`SELECT status FROM group_access WHERE chat_id=${target}`;
+    if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法移除授權。');
+    const rows=await managementSql`SELECT status FROM group_access WHERE chat_id=${target}`;
     if(rows[0]?.status!=='approved')return response('ℹ️ 找不到這個已授權群組，或它已經停用。');
     await sql`INSERT INTO group_access_action_challenges(user_id,target_chat_id,action,expires_at)
       VALUES(${context.userId},${target},'revoke',${new Date(now.getTime()+60000).toISOString()})
@@ -63,7 +65,8 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     const a=new Uint8Array(expected),b=new Uint8Array(actual);let diff=0;
     for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
     if(!env.ADMIN_PASSWORD||diff!==0)return response('❌ 管理密碼錯誤，此次操作已取消。');
-    const changed=await sql`UPDATE group_access SET status='denied' WHERE chat_id=${pending.target_chat_id} AND status='approved' RETURNING chat_id`;
+    if(!managementSql)return response('❌ 正式授權資料庫尚未連線，未移除授權。');
+    const changed=await managementSql`UPDATE group_access SET status='denied' WHERE chat_id=${pending.target_chat_id} AND status='approved' RETURNING chat_id`;
     return changed.length
       ? response(`✅ 已移除群組 ${pending.target_chat_id} 的授權。該群現在無法使用 BOSS Bot。`)
       : response('ℹ️ 該群組已沒有有效授權。');

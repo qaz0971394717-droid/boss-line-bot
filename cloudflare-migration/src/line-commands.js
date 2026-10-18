@@ -35,7 +35,10 @@ export function parseRespawnTime(day,clock) {
 
 export async function handleLineCommand(command, chatId, env, now=new Date(), context={}) {
  if(env.ENABLE_GROUP_APPROVAL==='true'){
-  const accessReply=await processGroupAccessCommand(command,chatId,env,createSql(env),now,context);
+  const managementSql=env.PRODUCTION_BOSS_DB?.prepare
+   ? createSql({DATABASE_BACKEND:'d1',BOSS_DB:env.PRODUCTION_BOSS_DB})
+   : null;
+  const accessReply=await processGroupAccessCommand(command,chatId,env,createSql(env),now,context,managementSql);
   if(accessReply)return accessReply;
  }
  if(command.trim()===BIRTHDAY_COMMAND)return birthdayEnabled(env,chatId)?birthdayGreeting():null;

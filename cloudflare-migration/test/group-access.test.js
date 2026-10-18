@@ -7,10 +7,13 @@ import {shouldProcessCommand} from '../src/command-filter.js';
 
 function setup(){
  const db=new DatabaseSync(':memory:');
+ const productionDb=new DatabaseSync(':memory:');
  db.exec('CREATE TABLE chat_settings(chat_id TEXT PRIMARY KEY,half_mode INTEGER NOT NULL DEFAULT 0); CREATE TABLE boss_kills(chat_id TEXT NOT NULL,boss_key TEXT NOT NULL,boss_name TEXT NOT NULL,kill_time TEXT,respawn_time TEXT,PRIMARY KEY(chat_id,boss_key));');
  for(const sql of GROUP_ACCESS_SCHEMA)db.exec(sql);
- const env={DATABASE_BACKEND:'d1',ENABLE_GROUP_APPROVAL:'true',ENABLE_STAGING_GROUP_ACCESS_ADMIN:'true',ENABLE_ADMIN_ACTOR_GUARD:'true',ADMIN_PASSWORD:'owner-secret',BOSS_DB:{prepare(query){return {bind(...args){return {async all(){return {success:true,results:db.prepare(query).all(...args)}}}}}}}};
- return {db,env,sql:createSql(env)};
+ for(const sql of GROUP_ACCESS_SCHEMA)productionDb.exec(sql);
+ const binding=database=>({prepare(query){return {bind(...args){return {async all(){return {success:true,results:database.prepare(query).all(...args)}}}}}}});
+ const env={DATABASE_BACKEND:'d1',ENABLE_GROUP_APPROVAL:'true',ENABLE_STAGING_GROUP_ACCESS_ADMIN:'true',ENABLE_ADMIN_ACTOR_GUARD:'true',ADMIN_PASSWORD:'owner-secret',BOSS_DB:binding(db),PRODUCTION_BOSS_DB:binding(productionDb)};
+ return {db,productionDb,env,sql:createSql(env),managementSql:createSql({DATABASE_BACKEND:'d1',BOSS_DB:env.PRODUCTION_BOSS_DB})};
 }
 const now=new Date('2026-10-18T10:00:00Z');
 const group='Cb6a98e7cead691d3f43cf6a743f34191';
@@ -66,16 +69,16 @@ test('wrong password and approvals without a pending request fail closed',async(
 });
 
 test('group can query only the count of approved groups',async()=>{
- const {db,env,sql}=setup();try{
-  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('approved-1','approved',now.toISOString());
-  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('approved-2','approved',now.toISOString());
-  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('pending-1','pending',now.toISOString());
+  const {db,productionDb,env,sql,managementSql}=setup();try{
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('approved-1','approved',now.toISOString());
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('approved-2','approved',now.toISOString());
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('pending-1','pending',now.toISOString());
   const user='U'+'b'.repeat(32);
-  const reply=await processGroupAccessCommand('授權群組數',user,env,sql,now,{sourceType:'user',userId:user});
-  assert.match(reply.text,/目前已授權：2 個群組/);
+  const reply=await processGroupAccessCommand('授權群組數',user,env,sql,now,{sourceType:'user',userId:user},managementSql);
+  assert.match(reply.text,/正式版目前已授權：2 個群組/);
   assert.doesNotMatch(reply.text,/approved-1|approved-2/);
-  assert.match((await processGroupAccessCommand('授權群組數',group,env,sql,now,{sourceType:'group',userId:user})).text,/請私訊/);
- }finally{db.close();}
+  assert.match((await processGroupAccessCommand('授權群組數',group,env,sql,now,{sourceType:'group',userId:user},managementSql)).text,/請私訊/);
+ }finally{db.close();productionDb.close();}
 });
 
 test('authorization count and revoke commands are disabled outside staging opt-in',async()=>{
@@ -89,32 +92,32 @@ test('authorization count and revoke commands are disabled outside staging opt-i
 });
 
 test('revoking a group requires private password confirmation and disables it',async()=>{
- const {db,env,sql}=setup();try{
-  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(group,'approved',now.toISOString());
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(group,'approved',now.toISOString());
   const user='U'+'b'.repeat(32);
-  const groupAttempt=await processGroupAccessCommand(`撤銷群組授權 ${group}`,group,env,sql,now,{sourceType:'group',userId:user});
+  const groupAttempt=await processGroupAccessCommand(`撤銷群組授權 ${group}`,group,env,sql,now,{sourceType:'group',userId:user},managementSql);
   assert.match(groupAttempt.text,/1 對 1 私訊/);
   assert.equal(db.prepare('SELECT count(*) AS n FROM group_access_action_challenges').get().n,0);
-  const prompt=await processGroupAccessCommand(`撤銷群組授權 ${group}`,user,env,sql,now,{sourceType:'user',userId:user});
+  const prompt=await processGroupAccessCommand(`撤銷群組授權 ${group}`,user,env,sql,now,{sourceType:'user',userId:user},managementSql);
   assert.match(prompt.text,/60 秒內於此私訊輸入管理密碼/);
-  assert.equal(db.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'approved');
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'approved');
   assert.equal(await shouldProcessCommand('owner-secret',user,env,{userId:user}),true);
-  const result=await processGroupAccessCommand('owner-secret',user,env,sql,now,{sourceType:'user',userId:user});
+  const result=await processGroupAccessCommand('owner-secret',user,env,sql,now,{sourceType:'user',userId:user},managementSql);
   assert.match(result.text,/已移除群組 .* 的授權/);
-  assert.equal(db.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'denied');
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'denied');
   assert.equal(db.prepare('SELECT count(*) AS n FROM group_access_action_challenges').get().n,0);
- }finally{db.close();}
+ }finally{db.close();productionDb.close();}
 });
 
 test('wrong private password does not revoke a group',async()=>{
- const {db,env,sql}=setup();try{
-  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(group,'approved',now.toISOString());
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(group,'approved',now.toISOString());
   const user='U'+'b'.repeat(32);
-  await processGroupAccessCommand(`撤銷群組授權 ${group}`,user,env,sql,now,{sourceType:'user',userId:user});
-  const result=await processGroupAccessCommand('wrong-password',user,env,sql,now,{sourceType:'user',userId:user});
+  await processGroupAccessCommand(`撤銷群組授權 ${group}`,user,env,sql,now,{sourceType:'user',userId:user},managementSql);
+  const result=await processGroupAccessCommand('wrong-password',user,env,sql,now,{sourceType:'user',userId:user},managementSql);
   assert.match(result.text,/密碼錯誤/);
-  assert.equal(db.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'approved');
- }finally{db.close();}
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(group).status,'approved');
+ }finally{db.close();productionDb.close();}
 });
 
 test('challenge replies are not treated as normal messages without an active approval challenge',async()=>{
