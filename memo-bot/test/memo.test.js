@@ -88,6 +88,31 @@ test('this-week weekday reminders accept everyday aliases and reject past dates'
  for(const [input,dueAt,content] of cases){assert.ok(knownCommand(input),input);assert.deepEqual(parseReminder(input,now),{content,dueAt},input);}
  assert.ok(parseReminder('這禮拜一早上10點開會',now).error);
 });
+test('colloquial weekday, week-offset and relative-date phrases are recognized',()=>{
+ const now=new Date('2026-10-19T04:47:00Z');
+ const cases=[
+  ['周四下午3點開會','2026-10-22T07:00:00.000Z','開會'],
+  ['星期四下午3點開會','2026-10-22T07:00:00.000Z','開會'],
+  ['禮拜四下午3點開會','2026-10-22T07:00:00.000Z','開會'],
+  ['本周四下午3點開會','2026-10-22T07:00:00.000Z','開會'],
+  ['下周四下午3點開會','2026-10-29T07:00:00.000Z','開會'],
+  ['下個禮拜四下午3點開會','2026-10-29T07:00:00.000Z','開會'],
+  ['這下禮拜四下午3點開會','2026-10-29T07:00:00.000Z','開會'],
+  ['下下周四下午3點開會','2026-11-05T07:00:00.000Z','開會'],
+  ['再下禮拜四下午3點開會','2026-11-05T07:00:00.000Z','開會'],
+  ['星期一早上10點開會','2026-10-26T02:00:00.000Z','開會'],
+  ['明早10點換記憶體','2026-10-20T02:00:00.000Z','換記憶體'],
+  ['明晚7點打電話','2026-10-20T11:00:00.000Z','打電話'],
+  ['明日的上午9點半開會','2026-10-20T01:30:00.000Z','開會'],
+  ['後日早晨8點出門','2026-10-21T00:00:00.000Z','出門'],
+  ['大後日晚上8點聚餐','2026-10-22T12:00:00.000Z','聚餐'],
+  ['兩天後提醒我回電','2026-10-21T04:47:00.000Z','回電'],
+  ['兩個星期後提醒我回電','2026-11-02T04:47:00.000Z','回電'],
+  ['半個小時後提醒我拿包裹','2026-10-19T05:17:00.000Z','拿包裹'],
+  ['一刻鐘後提醒我回電','2026-10-19T05:02:00.000Z','回電']
+ ];
+ for(const [input,dueAt,content] of cases){assert.ok(knownCommand(input),input);assert.deepEqual(parseReminder(input,now),{content,dueAt},input);}
+});
 test('ambiguous and invalid natural dates ask for clarification rather than guessing',()=>{
  const now=new Date('2026-10-17T04:47:00Z');
  for(const input of ['明天3點考試','明天買牛奶','明天下午3點','2月30日下午3點考試','明天下午3點70分考試','明天晚上12點拿包裹','提醒 每天 15:00 吃藥','提醒 0分鐘後 拿包裹'])assert.ok(parseReminder(input,now).error,input);
