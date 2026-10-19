@@ -76,6 +76,18 @@ test('natural reminders accept common Chinese phrasing without losing title text
  ];
  for(const [input,due,content] of cases){assert.ok(knownCommand(input),input);assert.deepEqual(parseReminder(input,now),{content,dueAt:due},input);}
 });
+test('this-week weekday reminders accept everyday aliases and reject past dates',()=>{
+ const now=new Date('2026-10-19T04:47:00Z');
+ const cases=[
+  ['這禮拜四早上10點要去欣婷換記憶體','2026-10-22T02:00:00.000Z','要去欣婷換記憶體'],
+  ['這星期四早上10點換記憶體','2026-10-22T02:00:00.000Z','換記憶體'],
+  ['這週四早上10點換記憶體','2026-10-22T02:00:00.000Z','換記憶體'],
+  ['本週四早上10點換記憶體','2026-10-22T02:00:00.000Z','換記憶體'],
+  ['這個禮拜四早上10點換記憶體','2026-10-22T02:00:00.000Z','換記憶體']
+ ];
+ for(const [input,dueAt,content] of cases){assert.ok(knownCommand(input),input);assert.deepEqual(parseReminder(input,now),{content,dueAt},input);}
+ assert.ok(parseReminder('這禮拜一早上10點開會',now).error);
+});
 test('ambiguous and invalid natural dates ask for clarification rather than guessing',()=>{
  const now=new Date('2026-10-17T04:47:00Z');
  for(const input of ['明天3點考試','明天買牛奶','明天下午3點','2月30日下午3點考試','明天下午3點70分考試','明天晚上12點拿包裹','提醒 每天 15:00 吃藥','提醒 0分鐘後 拿包裹'])assert.ok(parseReminder(input,now).error,input);
