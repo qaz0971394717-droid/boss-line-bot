@@ -12,9 +12,9 @@ function number(value){
 export function isReminderInput(input){
  const value=fullWidth(input.trim());
  if(/^今天(?:待辦|有什麼事|要做什麼|行程|提醒)$/.test(value))return false;
- return /^(?:提醒|今天|明天|後天|大後天|下(?:週|周|星期|禮拜)[一二三四五六日天1-7]|\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月\d{1,2}|\d{1,2}\/\d{1,2}|(?:半小時|[零〇一二兩三四五六七八九十\d]+\s*(?:分鐘|小時|分|天))\s*後)/.test(value);
+ return /^(?:提醒|今天|明天|後天|大後天|(?:這(?:個)?|本)(?:週|周|星期|禮拜)[一二三四五六日天1-7]|下(?:週|周|星期|禮拜)[一二三四五六日天1-7]|\d{4}[-/]\d{1,2}[-/]\d{1,2}|(?:\d{4}年)?\d{1,2}月\d{1,2}|\d{1,2}\/\d{1,2}|(?:半小時|[零〇一二兩三四五六七八九十\d]+\s*(?:分鐘|小時|分|天))\s*後)/.test(value);
 }
-const formatError=()=>({error:'可以直接說：明天下午3點提醒我拿包裹\n或：10/20 早上9點半 客戶維修\n請包含日期、時間和要提醒的事情。'});
+const formatError=()=>({error:'可直接說：這禮拜四早上10點換記憶體\n或：明天下午3點拿包裹。也可用下週一、10/20等日期。'});
 export function parseReminder(input,now=new Date()){
  let value=fullWidth(input.trim()).replace(/^提醒(?:我)?[\s:：]*/,'').trim();
  if(/^(?:每天|每週|每周|每月|每年)/.test(value))return {error:'目前支援單次提醒；重複提醒尚未開放。'};
@@ -29,6 +29,10 @@ export function parseReminder(input,now=new Date()){
   const today=taipeiDay(now),year=Number(today.slice(0,4));let date,rest,m;
   if((m=value.match(/^(今天|明天|後天|大後天)/))){
    date=taipeiDay(new Date(now.getTime()+({今天:0,明天:1,後天:2,大後天:3}[m[1]])*86400000));rest=value.slice(m[0].length);
+  }else if((m=value.match(/^(?:這(?:個)?|本)(?:週|周|星期|禮拜)([一二三四五六日天1-7])/))){
+   const target={一:1,二:2,三:3,四:4,五:5,六:6,日:7,天:7}[m[1]]||Number(m[1]);
+   const anchor=new Date(today+'T00:00:00Z'),weekday=anchor.getUTCDay()||7;
+   anchor.setUTCDate(anchor.getUTCDate()+target-weekday);date=anchor.toISOString().slice(0,10);rest=value.slice(m[0].length);
   }else if((m=value.match(/^下(?:週|周|星期|禮拜)([一二三四五六日天1-7])/))){
    const target={一:1,二:2,三:3,四:4,五:5,六:6,日:7,天:7}[m[1]]||Number(m[1]);
    const anchor=new Date(today+'T00:00:00Z'),weekday=anchor.getUTCDay()||7;
