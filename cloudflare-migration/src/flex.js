@@ -8,20 +8,12 @@ const shortTime=date=>{const p=parts(date);return `${p.hour}:${p.minute}`;};
 const titleText=(text,color="#1E293B")=>({type:"text",text,size:"xs",weight:"bold",color});
 // Row colours by status: already respawned, respawning within 30 minutes, later.
 const STATUS={
- due:{name:"#B91C1C",bg:"#FEE2E2",note:"#DC2626"},
- soon:{name:"#B45309",bg:"#FEF3C7",note:"#D97706"},
- later:{name:"#2563C5",bg:"#D9E8FC",note:"#64748B"}
+ due:{name:"#B91C1C",bg:"#FEE2E2"},
+ soon:{name:"#B45309",bg:"#FEF3C7"},
+ later:{name:"#2563C5",bg:"#D9E8FC"}
 };
-export function remainingText(ms){
- if(ms<=0)return "🔥已重生";
- const minutes=Math.ceil(ms/60000);
- if(minutes<60)return `${minutes}分`;
- const hours=Math.floor(minutes/60);
- if(hours<24)return `${hours}h${String(minutes%60).padStart(2,"0")}m`;
- return `${Math.floor(hours/24)}d${hours%24}h`;
-}
 const statusOf=ms=>ms<=0?"due":ms<=SOON_MS?"soon":"later";
-export function createKbFlex(rows,now=new Date(),compact=false){
+export function createKbFlex(rows,now=new Date()){
  if(!rows.length)return {type:"text",text:"📋 目前沒有 BOSS 紀錄。\n\n現在記錄：K 大象H\n手動補登：K 大象H 1022"};
  const nowMs=now.getTime();
  const header={type:"box",layout:"vertical",backgroundColor:"#1E3A8A",paddingAll:"12px",contents:[
@@ -46,11 +38,8 @@ export function createKbFlex(rows,now=new Date(),compact=false){
    const ms=respawn.getTime()-nowMs;
    const color=STATUS[statusOf(ms)];
    contents.push({type:"box",layout:"horizontal",margin:"md",spacing:"sm",alignItems:"center",contents:[
-    {type:"box",layout:"vertical",flex:4,contents:[
-     titleText(lineTime(respawn),"#111827"),
-     ...(compact?[]:[{type:"text",text:remainingText(ms),size:"xxs",weight:"bold",color:color.note}])
-    ]},
-    {type:"box",layout:"vertical",flex:5,backgroundColor:color.bg,cornerRadius:"5px",paddingAll:"7px",contents:[{...titleText(String(item.boss_name),color.name),size:"sm"}]},
+    {...titleText(lineTime(respawn),"#111827"),flex:3},
+    {type:"box",layout:"vertical",flex:6,backgroundColor:color.bg,cornerRadius:"5px",paddingAll:"7px",contents:[{...titleText(String(item.boss_name),color.name),size:"sm"}]},
     {type:"box",layout:"vertical",flex:3,backgroundColor:"#2563C5",cornerRadius:"6px",paddingAll:"7px",justifyContent:"center",contents:[{type:"text",text:"⚔ K王",size:"xs",weight:"bold",color:"#FFFFFF",align:"center"}],action:{type:"postback",label:"⚔ K王",data:"kbkill:"+item.boss_name}}
    ]});count++;
   }
@@ -59,8 +48,5 @@ export function createKbFlex(rows,now=new Date(),compact=false){
  for(let i=0;i<cards.length;i++)cards[i].footer.contents[1].text=`${i+1}/${cards.length}`;
  // LINE carousel supports at most 12 bubbles; caller should handle overflow explicitly.
  if(cards.length>12)return {type:"text",text:"❌ KB 卡片超過 LINE 單次顯示上限，請縮小查詢範圍。"};
- const message={type:"flex",altText:"BOSS 重生時間表",contents:{type:"carousel",contents:cards}};
- // LINE rejects Flex messages over 50KB; drop the countdown line when close to the limit.
- if(!compact&&Buffer.byteLength(JSON.stringify(message))>45000)return createKbFlex(rows,now,true);
- return message;
+ return {type:"flex",altText:"BOSS 重生時間表",contents:{type:"carousel",contents:cards}};
 }

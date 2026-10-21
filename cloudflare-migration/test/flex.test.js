@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createKbFlex, remainingText } from "../src/flex.js";
+import { createKbFlex } from "../src/flex.js";
 
 test("empty KB is text",()=>{
  assert.equal(createKbFlex([]).type,"text");
@@ -21,7 +21,7 @@ test("KB card pagination caps row count",()=>{
  assert.ok(result.contents.contents.length>=2);
  for(const card of result.contents.contents)assert.ok(card.body.contents.filter(x=>x.layout==="horizontal").length<=13);
 });
-test("KB rows show countdown and status colours",()=>{
+test("KB rows use status colours",()=>{
  const now=new Date("2026-10-16T06:00:00.000Z");
  const result=createKbFlex([
   {boss_name:"已到",respawn_time:"2026-10-16T05:59:00.000Z"},
@@ -29,15 +29,10 @@ test("KB rows show countdown and status colours",()=>{
   {boss_name:"還久",respawn_time:"2026-10-16T08:15:00.000Z"}
  ],now);
  const rows=result.contents.contents[0].body.contents.filter(x=>x.layout==="horizontal");
- assert.deepEqual(rows.map(r=>r.contents[0].contents[1].text),["🔥已重生","12分","2h15m"]);
  assert.deepEqual(rows.map(r=>r.contents[1].backgroundColor),["#FEE2E2","#FEF3C7","#D9E8FC"]);
  assert.ok(JSON.stringify(result.contents.contents[0].header).includes("共 3 隻"));
 });
-test("remaining time formats days",()=>{
- assert.equal(remainingText(26*3600*1000),"1d2h");
-});
-test("very large KB falls back to compact rows under LINE size limit",()=>{
+test("large KB stays under LINE size limit",()=>{
  const rows=Array.from({length:55},(_,i)=>({boss_name:"黑龍王"+i,respawn_time:"2026-10-16T06:30:25.000Z"}));
- const result=createKbFlex(rows,new Date("2026-10-16T06:00:00.000Z"));
- assert.ok(Buffer.byteLength(JSON.stringify(result))<50000);
+ assert.ok(Buffer.byteLength(JSON.stringify(createKbFlex(rows)))<50000);
 });
