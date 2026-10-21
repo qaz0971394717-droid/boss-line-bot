@@ -30,10 +30,10 @@ export function createKbFlex(rows,now=new Date()){
  for(const [date,items] of [...groups].sort(([a],[b])=>a.localeCompare(b))){
   const weekday=new Intl.DateTimeFormat("zh-TW",{timeZone:tz,weekday:"short"}).format(new Date(items[0].respawn_time));
   const isToday=date===dateKey(now);
-  if(contents.length&&count+items.length+1>13)flush();
+  if(contents.length&&count+items.length+1>15)flush();
   contents.push({type:"box",layout:"vertical",backgroundColor:"#E1E8F1",cornerRadius:"5px",paddingAll:"6px",margin:contents.length?"lg":"none",contents:[titleText(`📅 ${date.slice(5).replace("-","/")} ${weekday}${isToday?"（今天）":""}`)]});count++;
   for(const item of items){
-   if(count>=13)flush();
+   if(count>=15)flush();
    const respawn=new Date(item.respawn_time);
    const ms=respawn.getTime()-nowMs;
    const color=STATUS[statusOf(ms)];

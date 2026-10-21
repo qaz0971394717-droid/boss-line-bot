@@ -19,7 +19,7 @@ test("KB card pagination caps row count",()=>{
  const result=createKbFlex(rows);
  assert.equal(result.type,"flex");
  assert.ok(result.contents.contents.length>=2);
- for(const card of result.contents.contents)assert.ok(card.body.contents.filter(x=>x.layout==="horizontal").length<=13);
+ for(const card of result.contents.contents)assert.ok(card.body.contents.filter(x=>x.layout==="horizontal").length<=15);
 });
 test("KB rows use status colours",()=>{
  const now=new Date("2026-10-16T06:00:00.000Z");
