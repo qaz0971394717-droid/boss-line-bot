@@ -1,5 +1,5 @@
 {
-  "sha": "c31e9f614ed7b6f5565ebb4ef4921cd9c97d1495",
-  "acceptance": "User confirmed the staging authorization and private management tests work on 2026-10-18 Asia/Taipei. Promote the new-group authorization gate to production, grandfather existing groups, and keep authorization count/revocation commands restricted to the staging bot's 1:1 chat. Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 98
+  "sha": "1838b8141d07dd2215794545334c8443ad949734",
+  "acceptance": "User approved the redesigned KB card on 2026-10-21 Asia/Taipei after testing on staging. Release contains only the KB card change (flex.js) on top of the previous production release; no other staging changes. Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 100
 }
