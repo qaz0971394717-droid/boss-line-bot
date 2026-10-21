@@ -13,12 +13,12 @@ const STATUS={
  later:{name:"#2563C5",bg:"#D9E8FC",note:"#64748B"}
 };
 export function remainingText(ms){
- if(ms<=0)return "🔥 已重生";
+ if(ms<=0)return "🔥已重生";
  const minutes=Math.ceil(ms/60000);
- if(minutes<60)return `${minutes}分後`;
+ if(minutes<60)return `${minutes}分`;
  const hours=Math.floor(minutes/60);
- if(hours<24)return `${hours}時${minutes%60}分後`;
- return `${Math.floor(hours/24)}天${hours%24}時後`;
+ if(hours<24)return `${hours}h${String(minutes%60).padStart(2,"0")}m`;
+ return `${Math.floor(hours/24)}d${hours%24}h`;
 }
 const statusOf=ms=>ms<=0?"due":ms<=SOON_MS?"soon":"later";
 export function createKbFlex(rows,now=new Date(),compact=false){
@@ -46,11 +46,11 @@ export function createKbFlex(rows,now=new Date(),compact=false){
    const ms=respawn.getTime()-nowMs;
    const color=STATUS[statusOf(ms)];
    contents.push({type:"box",layout:"horizontal",margin:"md",spacing:"sm",alignItems:"center",contents:[
-    {type:"box",layout:"vertical",flex:3,contents:[
+    {type:"box",layout:"vertical",flex:4,contents:[
      titleText(lineTime(respawn),"#111827"),
      ...(compact?[]:[{type:"text",text:remainingText(ms),size:"xxs",weight:"bold",color:color.note}])
     ]},
-    {type:"box",layout:"vertical",flex:6,backgroundColor:color.bg,cornerRadius:"5px",paddingAll:"7px",contents:[{...titleText(String(item.boss_name),color.name),size:"sm"}]},
+    {type:"box",layout:"vertical",flex:5,backgroundColor:color.bg,cornerRadius:"5px",paddingAll:"7px",contents:[{...titleText(String(item.boss_name),color.name),size:"sm"}]},
     {type:"box",layout:"vertical",flex:3,backgroundColor:"#2563C5",cornerRadius:"6px",paddingAll:"7px",justifyContent:"center",contents:[{type:"text",text:"⚔ K王",size:"xs",weight:"bold",color:"#FFFFFF",align:"center"}],action:{type:"postback",label:"⚔ K王",data:"kbkill:"+item.boss_name}}
    ]});count++;
   }
