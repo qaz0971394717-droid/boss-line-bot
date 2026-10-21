@@ -21,7 +21,7 @@ export function createKbFlex(rows,now=new Date()){
    {type:"text",text:"⚔️ BOSS 重生表",size:"md",weight:"bold",color:"#FFFFFF",flex:1},
    {type:"text",text:`共 ${rows.length} 隻`,size:"xs",weight:"bold",color:"#BFDBFE",align:"end"}
   ]},
-  {type:"text",text:`更新 ${shortTime(now)}　🔥已重生　⏰30分內`,size:"xxs",color:"#BFDBFE",margin:"xs"}
+  {type:"text",text:`更新 ${shortTime(now)}`,size:"xxs",color:"#BFDBFE",margin:"xs"}
  ]};
  const cards=[];let contents=[],count=0;
  const flush=()=>{if(!contents.length)return;cards.push({type:"bubble",size:"mega",header:structuredClone(header),body:{type:"box",layout:"vertical",paddingAll:"12px",contents},footer:{type:"box",layout:"horizontal",contents:[titleText("時區: Asia/Taipei","#94A3B8"),{...titleText("","#94A3B8"),align:"end"}]}});contents=[];count=0;};
