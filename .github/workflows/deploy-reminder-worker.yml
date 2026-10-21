@@ -1,0 +1,107 @@
+name: Deploy Discord reminder worker
+
+# Deploys the code of qaz0971394717-droid/hit2-boss-reminder to the live
+# hit2-boss-reminder-v2 Worker. It runs only when .github/reminder-release.json
+# changes on this branch, so every deployment is an explicit, reviewable commit.
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['.github/reminder-release.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hit2-reminder-deploy
+  cancel-in-progress: false
+
+env:
+  WORKER_NAME: hit2-boss-reminder-v2
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read approved release
+        id: release
+        run: |
+          node -e '
+            const fs=require("fs");
+            const release=JSON.parse(fs.readFileSync(".github/reminder-release.json","utf8"));
+            if(release.repository!=="qaz0971394717-droid/hit2-boss-reminder")throw Error("Unexpected repository");
+            if(!/^[a-f0-9]{40}$/.test(release.sha))throw Error("Approved release SHA missing");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,"sha="+release.sha+"\n");
+          '
+
+      - uses: actions/checkout@v4
+        with:
+          repository: qaz0971394717-droid/hit2-boss-reminder
+          ref: ${{ steps.release.outputs.sha }}
+          path: reminder
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install and test
+        working-directory: reminder
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      - name: Check the bundle
+        working-directory: reminder
+        run: npx wrangler deploy --dry-run --name "$WORKER_NAME"
+
+      - name: Record the live Worker before deploying
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/settings" \
+            | jq -e '.success' > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/settings" \
+            | jq -S '[.result.bindings[] | {name, type}] | sort_by(.name)' > "$RUNNER_TEMP/bindings-before.json"
+          prev=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/deployments" \
+            | jq -r '.result.deployments[0].versions[0].version_id')
+          if [ -z "$prev" ] || [ "$prev" = "null" ]; then echo "::error::Cannot determine the current version"; exit 1; fi
+          echo "PREV_VERSION=$prev" >> "$GITHUB_ENV"
+          echo "Bindings before: $(jq -c 'map(.name)' "$RUNNER_TEMP/bindings-before.json")"
+          echo "Current version recorded for rollback."
+
+      - name: Deploy reminder Worker
+        id: deploy
+        working-directory: reminder
+        run: npx wrangler deploy --name "$WORKER_NAME" --keep-vars --message "release ${{ steps.release.outputs.sha }}"
+
+      - name: Verify the live Worker
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME"
+          sleep 5
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/settings" \
+            | jq -S '[.result.bindings[] | {name, type}] | sort_by(.name)' > "$RUNNER_TEMP/bindings-after.json"
+          missing=$(jq -n --slurpfile b "$RUNNER_TEMP/bindings-before.json" --slurpfile a "$RUNNER_TEMP/bindings-after.json" \
+            '[$b[0][] | select(. as $x | ($a[0] | index($x)) == null)]')
+          if [ "$(echo "$missing" | jq 'length')" != "0" ]; then
+            echo "::error::Bindings were lost by the deployment: $(echo "$missing" | jq -c 'map(.name)')"
+            exit 1
+          fi
+          echo "Bindings preserved: $(jq -c 'map(.name)' "$RUNNER_TEMP/bindings-after.json")"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api" -o "$RUNNER_TEMP/live-script.bin"
+          if ! grep -q -F '已重生' "$RUNNER_TEMP/live-script.bin" && ! grep -q -F '已重生' "$RUNNER_TEMP/live-script.bin"; then
+            echo "::error::The live Worker does not contain the new respawn notification code"
+            exit 1
+          fi
+          echo "Live Worker contains the new code."
+
+      - name: Roll back automatically if verification failed
+        if: failure() && steps.deploy.outcome == 'success'
+        working-directory: reminder
+        run: npx wrangler rollback "$PREV_VERSION" --name "$WORKER_NAME" --yes --message "automatic rollback after failed verification"
