@@ -125,3 +125,40 @@ test('challenge replies are not treated as normal messages without an active app
   assert.equal(await shouldProcessCommand('owner-secret','U'+'b'.repeat(32),env,{userId:'U'+'b'.repeat(32)}),false);
  }finally{db.close();}
 });
+
+test('staging admin DM approves a pending production group without touching staging data',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const target='C'+'a'.repeat(32),user='U'+'b'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(target,'pending',now.toISOString());
+  const ctx={userId:user,sourceType:'user'};
+  assert.match((await processGroupAccessCommand(`授權群組 ${target}`,user,env,sql,now,ctx,managementSql)).text,/60 秒/);
+  assert.match((await processGroupAccessCommand('wrong',user,env,sql,now,ctx,managementSql)).text,/密碼錯誤/);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(target).status,'pending');
+  await processGroupAccessCommand(`授權群組 ${target}`,user,env,sql,now,ctx,managementSql);
+  assert.match((await processGroupAccessCommand('owner-secret',user,env,sql,now,ctx,managementSql)).text,/已授權群組/);
+  assert.equal(productionDb.prepare('SELECT status,approved_by FROM group_access WHERE chat_id=?').get(target).approved_by,user);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM group_access').get().n,0);
+ }finally{db.close();productionDb.close();}
+});
+
+test('staging admin DM still approves a group that applied to the staging bot',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const target='C'+'a'.repeat(32),user='U'+'b'.repeat(32);
+  await groupAccessReply('申請使用',target,'group',env,sql,now);
+  const ctx={userId:user,sourceType:'user'};
+  await processGroupAccessCommand(`授權群組 ${target}`,user,env,sql,now,ctx,managementSql);
+  assert.match((await processGroupAccessCommand('owner-secret',user,env,sql,now,ctx,managementSql)).text,/已授權群組/);
+  assert.equal(db.prepare('SELECT status FROM group_access WHERE chat_id=?').get(target).status,'approved');
+ }finally{db.close();productionDb.close();}
+});
+
+test('production bot approval never reaches another database',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const target='C'+'a'.repeat(32),user='U'+'b'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(target,'pending',now.toISOString());
+  const prodEnv={...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:undefined};
+  const ctx={userId:user,sourceType:'user'};
+  await processGroupAccessCommand(`授權群組 ${target}`,user,prodEnv,sql,now,ctx);
+  assert.match((await processGroupAccessCommand('owner-secret',user,prodEnv,sql,now,ctx)).text,/待審申請/);
+ }finally{db.close();productionDb.close();}
+});

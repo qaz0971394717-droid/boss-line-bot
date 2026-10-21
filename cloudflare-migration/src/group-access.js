@@ -94,8 +94,13 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
   const a=new Uint8Array(expected),b=new Uint8Array(actual);let diff=0;
   for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
   if(diff!==0)return response('❌ 管理密碼錯誤，此次授權已取消。');
-  const changed=await sql`UPDATE group_access SET status='approved',approved_at=${now.toISOString()},approved_by=${context.userId}
+  const approve=db=>db`UPDATE group_access SET status='approved',approved_at=${now.toISOString()},approved_by=${context.userId}
     WHERE chat_id=${pending[0].target_chat_id} AND status='pending' RETURNING chat_id`;
+  // The staging bot's private chat is the admin console: approve production requests first,
+  // then fall back to this bot's own database for groups that applied to the staging bot.
+  const adminConsole=env.ENABLE_STAGING_GROUP_ACCESS_ADMIN==='true'&&managementSql;
+  let changed=adminConsole?await approve(managementSql):[];
+  if(!changed.length)changed=await approve(sql);
   return changed.length
     ? response(`✅ 已授權群組 ${pending[0].target_chat_id}，現在可以開始使用。`)
     : response('⚠️ 找不到這個群組的待審申請，請先在該群輸入「申請使用」。');
