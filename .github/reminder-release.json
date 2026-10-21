@@ -1,0 +1,5 @@
+{
+  "repository": "qaz0971394717-droid/hit2-boss-reminder",
+  "sha": "08d08bf53b1e7cef087a104a6f7062a1b8c1852f",
+  "acceptance": "User approved on 2026-10-22 Asia/Taipei: send a single Discord notification at the BOSS respawn moment instead of 5 and 1 minute reminders; retry safely without duplicates; report undeliverable notifications. 34 tests pass; verified against local Workers runtime including conversion of reminders scheduled by the previous version."
+}
