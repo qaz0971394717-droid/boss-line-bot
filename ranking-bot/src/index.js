@@ -65,7 +65,26 @@ export async function runDaily(env, fetcher = fetch, now = new Date()) {
   const owner = OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "") ? env.OWNER_LINE_USER_ID : null;
   const { result, text } = await buildMessage(env, fetcher, now);
   await pushText(env, fetcher, owner, text);
-  return { pushed: true, mode: owner ? "owner" : "broadcast", ok: result.ok, count: result.ok ? result.items.length : 0 };
+  return { pushed: true, mode: owner ? "owner" : "broadcast", ok: result.ok, count: result.ok ? result.items.length : 0, text };
+}
+
+const taipeiDay = (ms) =>
+  new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+
+async function sameSecret(a, b) {
+  const [x, y] = await Promise.all([a, b].map(async (v) => new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(String(v))))));
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+// The home computer fetches the ranking (the site blocks cloud IPs) and leaves the latest good
+// copy here, so asking the bot for "排行" returns it without any scraping from the cloud.
+async function latestReply(env, now = Date.now()) {
+  const saved = await env.LATEST?.get("latest", "json");
+  if (!saved?.text) return "還沒有收到排行資料。電腦每天早上 8 點抓到後會更新，稍後再試。";
+  const day = taipeiDay(saved.savedAt);
+  return day === taipeiDay(now) ? saved.text : `⚠️ 這是 ${day} 的排行，今天的還沒更新。\n\n${saved.text}`;
 }
 
 const reply = (env, fetcher, replyToken, text) =>
@@ -94,6 +113,20 @@ export function createWorker({ fetcher = fetch } = {}) {
           owner_configured: OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || ""),
           line_configured: Boolean(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN),
         });
+      if (request.method === "POST" && path === "/latest") {
+        const token = (request.headers.get("authorization") || "").replace(/^Bearer /, "");
+        if (!env.LINE_CHANNEL_ACCESS_TOKEN || !env.LATEST || !(await sameSecret(token, env.LINE_CHANNEL_ACCESS_TOKEN)))
+          return new Response("Unauthorized", { status: 401 });
+        let data;
+        try {
+          data = await request.json();
+        } catch {
+          return json({ error: "Invalid JSON" }, 400);
+        }
+        if (typeof data?.text !== "string" || !data.text || data.text.length > 4500) return json({ error: "Invalid text" }, 400);
+        await env.LATEST.put("latest", JSON.stringify({ text: data.text, savedAt: Date.now() }));
+        return json({ ok: true });
+      }
       if (request.method !== "POST" || path !== "/callback") return new Response("Not Found", { status: 404 });
 
       const body = await request.text();
@@ -123,11 +156,7 @@ export function createWorker({ fetcher = fetch } = {}) {
             if (text === "我的ID") {
               await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "（目前所有好友都會收到推播）"}`);
             } else if (allowed && /^(排行|今日|今天|top|TOP|現在)$/.test(text)) {
-              // The reply token expires within about a minute and the site can be slow, so
-              // acknowledge at once and deliver the ranking as a push.
-              await reply(env, fetcher, event.replyToken, "查詢中，請稍候…");
-              const { text: message } = await buildMessage(env, fetcher);
-              await pushText(env, fetcher, userId, message);
+              await reply(env, fetcher, event.replyToken, await latestReply(env));
             } else if (allowed) {
               await reply(env, fetcher, event.replyToken, "每天早上 8 點會自動推播前 10 名。\n輸入「排行」可以立即查看。");
             }

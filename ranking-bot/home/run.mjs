@@ -47,8 +47,23 @@ try {
     console.log(text);
   } else {
     const out = await runDaily(env, browserFetch);
-    console.log(JSON.stringify(out));
+    console.log(JSON.stringify({ ...out, text: undefined }));
     if (!out.pushed) process.exitCode = 2;
+    // leave a copy in the cloud so typing "排行" in LINE shows today's list
+    if (out.ok) {
+      try {
+        const base = env.RANKING_WORKER_URL || "https://daily-ranking-bot.qaz0971394717.workers.dev";
+        const saved = await fetch(base + "/latest", {
+          method: "POST",
+          headers: { Authorization: "Bearer " + env.LINE_CHANNEL_ACCESS_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({ text: out.text }),
+          signal: AbortSignal.timeout(15000),
+        });
+        console.log("存到雲端：", saved.ok ? "成功" : "失敗 HTTP " + saved.status);
+      } catch (error) {
+        console.error("存到雲端失敗：", error?.message || error);
+      }
+    }
   }
 } catch (error) {
   console.error("執行失敗：", error?.message || error);

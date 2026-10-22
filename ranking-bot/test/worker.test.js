@@ -7,6 +7,11 @@ const SECRET = "channel-secret";
 const baseEnv = { LINE_CHANNEL_SECRET: SECRET, LINE_CHANNEL_ACCESS_TOKEN: "tok", OWNER_LINE_USER_ID: OWNER, RANKING_SOURCE_URL: "https://my.test/hot" };
 const html = (n) => `<html>${Array.from({ length: n }, (_, i) => `<a href="/cn/ssis-${100 + i}"><img alt="SSIS-${100 + i} 片名${i + 1}"></a>`).join("")}</html>`;
 
+const kv = (initial) => {
+  const store = new Map(initial ? [["latest", JSON.stringify(initial)]] : []);
+  return { store, get: async (k) => (store.has(k) ? JSON.parse(store.get(k)) : null), put: async (k, v) => void store.set(k, v) };
+};
+
 function harness({ site = () => ({ status: 200, body: html(10) }), line = () => 200 } = {}) {
   const sent = [];
   const fetcher = async (url, init) => {
@@ -33,7 +38,8 @@ async function callback(worker, env, events, secret = SECRET) {
 test("the daily run pushes the ranking to the owner only", async () => {
   const h = harness();
   const out = await runDaily(baseEnv, h.fetcher, new Date("2026-10-22T00:00:00Z"));
-  assert.deepEqual(out, { pushed: true, mode: "owner", ok: true, count: 10 });
+  assert.deepEqual({ ...out, text: undefined }, { pushed: true, mode: "owner", ok: true, count: 10, text: undefined });
+  assert.match(out.text, /TOP 10/);
   assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].url, "/v2/bot/message/push");
   assert.equal(h.sent[0].body.to, OWNER);
@@ -63,7 +69,7 @@ test("without a valid owner ID the ranking is broadcast to every friend", async 
   for (const owner of ["", undefined, "not-an-id"]) {
     const h = harness();
     const out = await runDaily({ ...baseEnv, OWNER_LINE_USER_ID: owner }, h.fetcher);
-    assert.deepEqual(out, { pushed: true, mode: "broadcast", ok: true, count: 10 });
+    assert.deepEqual({ ...out, text: undefined }, { pushed: true, mode: "broadcast", ok: true, count: 10, text: undefined });
     assert.equal(h.sent[0].url, "/v2/bot/message/broadcast");
     assert.equal("to" in h.sent[0].body, false);
     assert.match(h.sent[0].body.messages[0].text, /TOP 10/);
@@ -124,25 +130,43 @@ test("anyone can ask for their own ID, which is how the owner is configured", as
   assert.match(h.sent[0].body.messages[0].text, /所有好友都會收到/);
 });
 
-test("only the owner can ask for the ranking on demand", async () => {
+test("asking for the ranking replies with the copy saved today, without fetching anything", async () => {
   const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
-  await callback(worker, baseEnv, [event("排行", OWNER)]);
-  assert.equal(h.sent.length, 2);
+  const env = { ...baseEnv, LATEST: kv({ text: "📊 今日熱門 TOP 10\n1. A", savedAt: Date.now() }) };
+  await callback(worker, env, [event("排行", OWNER)]);
+  assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].url, "/v2/bot/message/reply");
-  assert.match(h.sent[0].body.messages[0].text, /查詢中/);
-  assert.equal(h.sent[1].url, "/v2/bot/message/push");
-  assert.equal(h.sent[1].body.to, OWNER);
-  assert.match(h.sent[1].body.messages[0].text, /TOP 10/);
-  await callback(worker, baseEnv, [event("排行", OTHER)]);
-  await callback(worker, baseEnv, [event("hello", OTHER)]);
-  assert.equal(h.sent.length, 2, "strangers get no reply and no data");
+  assert.equal(h.sent[0].body.messages[0].text, "📊 今日熱門 TOP 10\n1. A");
 });
 
-test("with no owner configured every friend can ask for the ranking", async () => {
+test("an older saved copy is labelled with its date; nothing saved says so", async () => {
   const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
-  await callback(worker, { ...baseEnv, OWNER_LINE_USER_ID: "" }, [event("排行", OTHER)]);
-  assert.match(h.sent[0].body.messages[0].text, /查詢中/);
-  assert.match(h.sent[1].body.messages[0].text, /TOP 10/);
+  await callback(worker, { ...baseEnv, LATEST: kv({ text: "OLD", savedAt: Date.parse("2026-10-01T00:00:00Z") }) }, [event("排行", OWNER)]);
+  assert.match(h.sent[0].body.messages[0].text, /這是 2026-10-01 的排行，今天的還沒更新[\s\S]*OLD/);
+  await callback(worker, { ...baseEnv, LATEST: kv() }, [event("排行", OWNER)]);
+  assert.match(h.sent[1].body.messages[0].text, /還沒有收到排行資料/);
+});
+
+test("only the owner can ask for the ranking when an owner is set", async () => {
+  const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
+  const env = { ...baseEnv, LATEST: kv({ text: "X", savedAt: Date.now() }) };
+  await callback(worker, env, [event("排行", OTHER)]);
+  await callback(worker, env, [event("hello", OTHER)]);
+  assert.equal(h.sent.length, 0, "strangers get no reply and no data");
+});
+
+test("the home computer can save the latest ranking, only with the channel token", async () => {
+  const worker = createWorker(); const LATEST = kv(); const env = { ...baseEnv, LATEST };
+  const post = (headers, body = JSON.stringify({ text: "RANK" })) => worker.fetch(new Request("https://x/latest", { method: "POST", headers, body }), env);
+  assert.equal((await post({})).status, 401);
+  assert.equal((await post({ Authorization: "Bearer wrong" })).status, 401);
+  assert.equal(LATEST.store.size, 0);
+  assert.equal((await post({ Authorization: "Bearer tok" }, "not json")).status, 400);
+  assert.equal((await post({ Authorization: "Bearer tok" }, JSON.stringify({ text: "" }))).status, 400);
+  assert.equal((await post({ Authorization: "Bearer tok" })).status, 200);
+  assert.equal(JSON.parse(LATEST.store.get("latest")).text, "RANK");
+  const noKv = await worker.fetch(new Request("https://x/latest", { method: "POST", headers: { Authorization: "Bearer tok" }, body: "{}" }), baseEnv);
+  assert.equal(noKv.status, 401);
 });
 
 test("the owner gets a short help text for anything else; groups and non-text events are ignored", async () => {
