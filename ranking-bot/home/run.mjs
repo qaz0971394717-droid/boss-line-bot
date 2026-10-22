@@ -25,7 +25,9 @@ let browser;
 async function browserFetch(url, init) {
   if (/line\.me|127\.0\.0\.1:\d+\/v2/.test(url) || env.LINE_API_BASE && url.startsWith(env.LINE_API_BASE)) return fetch(url, init);
   browser ??= await chromium.launch({
-    headless: env.SHOW_BROWSER === "0", // the site only lets a visible Chrome through
+    headless: false, // the site only lets a real (non-headless) Chrome through
+    // keep the window off-screen so it does not interrupt; SHOW_BROWSER=1 brings it back on screen
+    args: env.SHOW_BROWSER === "1" ? [] : ["--window-position=-2400,-2400", "--window-size=1280,800", "--start-minimized", "--mute-audio"],
     ...(env.CHROME_PATH ? { executablePath: env.CHROME_PATH } : { channel: "chrome" }),
   });
   const page = await browser.newPage({ locale: "zh-TW" });
