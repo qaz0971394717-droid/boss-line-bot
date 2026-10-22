@@ -39,10 +39,12 @@ async function lineCall(env, fetcher, path, payload) {
 }
 
 // One retry for transient LINE errors; 4xx other than 429 will not get better.
+// `to` omitted = broadcast to every friend of the bot.
 export async function pushText(env, fetcher, to, text) {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      await lineCall(env, fetcher, "/v2/bot/message/push", { to, messages: [{ type: "text", text }] });
+      const messages = [{ type: "text", text }];
+      await lineCall(env, fetcher, to ? "/v2/bot/message/push" : "/v2/bot/message/broadcast", to ? { to, messages } : { messages });
       return;
     } catch (error) {
       const retryable = !error.status || error.status >= 500 || error.status === 429;
@@ -58,11 +60,12 @@ export async function buildMessage(env, fetcher, now = new Date()) {
 }
 
 export async function runDaily(env, fetcher = fetch, now = new Date()) {
-  if (!OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "") || !env.LINE_CHANNEL_ACCESS_TOKEN)
-    return { pushed: false, reason: "not-configured" };
+  if (!env.LINE_CHANNEL_ACCESS_TOKEN) return { pushed: false, reason: "not-configured" };
+  // A valid owner ID narrows delivery to one person; without it everyone who added the bot gets it.
+  const owner = OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "") ? env.OWNER_LINE_USER_ID : null;
   const { result, text } = await buildMessage(env, fetcher, now);
-  await pushText(env, fetcher, env.OWNER_LINE_USER_ID, text);
-  return { pushed: true, ok: result.ok, count: result.ok ? result.items.length : 0 };
+  await pushText(env, fetcher, owner, text);
+  return { pushed: true, mode: owner ? "owner" : "broadcast", ok: result.ok, count: result.ok ? result.items.length : 0 };
 }
 
 const reply = (env, fetcher, replyToken, text) =>
@@ -113,17 +116,19 @@ export function createWorker({ fetcher = fetch } = {}) {
           if (event.source?.type !== "user" || event.mode === "standby") continue;
           const userId = event.source.userId;
           const text = String(event.message.text || "").trim();
-          const isOwner = OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "") && userId === env.OWNER_LINE_USER_ID;
+          const ownerSet = OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "");
+          const isOwner = ownerSet && userId === env.OWNER_LINE_USER_ID;
+          const allowed = isOwner || !ownerSet; // no owner configured = open to every friend
           try {
             if (text === "我的ID") {
-              await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "請把它設定為 RANKING_OWNER_LINE_USER_ID。"}`);
-            } else if (isOwner && /^(排行|今日|今天|top|TOP|現在)$/.test(text)) {
+              await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "（目前所有好友都會收到推播）"}`);
+            } else if (allowed && /^(排行|今日|今天|top|TOP|現在)$/.test(text)) {
               const { text: message } = await buildMessage(env, fetcher);
               await reply(env, fetcher, event.replyToken, message);
-            } else if (isOwner) {
+            } else if (allowed) {
               await reply(env, fetcher, event.replyToken, "每天早上 8 點會自動推播前 10 名。\n輸入「排行」可以立即查看。");
             }
-            // anyone else: no reply, nothing stored
+            // owner-only mode and not the owner: no reply, nothing stored
           } catch (error) {
             console.error("Reply failed:", error?.status || error?.name);
             failed++;

@@ -33,7 +33,7 @@ async function callback(worker, env, events, secret = SECRET) {
 test("the daily run pushes the ranking to the owner only", async () => {
   const h = harness();
   const out = await runDaily(baseEnv, h.fetcher, new Date("2026-10-22T00:00:00Z"));
-  assert.deepEqual(out, { pushed: true, ok: true, count: 10 });
+  assert.deepEqual(out, { pushed: true, mode: "owner", ok: true, count: 10 });
   assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].url, "/v2/bot/message/push");
   assert.equal(h.sent[0].body.to, OWNER);
@@ -59,12 +59,21 @@ test("a partial ranking is still pushed with a warning", async () => {
   assert.match(h.sent[0].body.messages[0].text, /只解析到 6 筆/);
 });
 
-test("nothing is pushed until the owner and token are configured", async () => {
-  for (const env of [{ ...baseEnv, OWNER_LINE_USER_ID: "" }, { ...baseEnv, OWNER_LINE_USER_ID: "not-an-id" }, { ...baseEnv, LINE_CHANNEL_ACCESS_TOKEN: "" }]) {
+test("without a valid owner ID the ranking is broadcast to every friend", async () => {
+  for (const owner of ["", undefined, "not-an-id"]) {
     const h = harness();
-    assert.deepEqual(await runDaily(env, h.fetcher), { pushed: false, reason: "not-configured" });
-    assert.equal(h.sent.length, 0);
+    const out = await runDaily({ ...baseEnv, OWNER_LINE_USER_ID: owner }, h.fetcher);
+    assert.deepEqual(out, { pushed: true, mode: "broadcast", ok: true, count: 10 });
+    assert.equal(h.sent[0].url, "/v2/bot/message/broadcast");
+    assert.equal("to" in h.sent[0].body, false);
+    assert.match(h.sent[0].body.messages[0].text, /TOP 10/);
   }
+});
+
+test("nothing is sent without a channel token", async () => {
+  const h = harness();
+  assert.deepEqual(await runDaily({ ...baseEnv, LINE_CHANNEL_ACCESS_TOKEN: "" }, h.fetcher), { pushed: false, reason: "not-configured" });
+  assert.equal(h.sent.length, 0);
 });
 
 test("a transient LINE error is retried once; a client error is not", async () => {
@@ -112,7 +121,7 @@ test("anyone can ask for their own ID, which is how the owner is configured", as
   assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].url, "/v2/bot/message/reply");
   assert.match(h.sent[0].body.messages[0].text, new RegExp(OTHER));
-  assert.match(h.sent[0].body.messages[0].text, /RANKING_OWNER_LINE_USER_ID/);
+  assert.match(h.sent[0].body.messages[0].text, /所有好友都會收到/);
 });
 
 test("only the owner can ask for the ranking on demand", async () => {
@@ -123,6 +132,12 @@ test("only the owner can ask for the ranking on demand", async () => {
   await callback(worker, baseEnv, [event("排行", OTHER)]);
   await callback(worker, baseEnv, [event("hello", OTHER)]);
   assert.equal(h.sent.length, 1, "strangers get no reply and no data");
+});
+
+test("with no owner configured every friend can ask for the ranking", async () => {
+  const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
+  await callback(worker, { ...baseEnv, OWNER_LINE_USER_ID: "" }, [event("排行", OTHER)]);
+  assert.match(h.sent[0].body.messages[0].text, /TOP 10/);
 });
 
 test("the owner gets a short help text for anything else; groups and non-text events are ignored", async () => {
