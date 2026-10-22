@@ -112,7 +112,7 @@ export async function fetchRanking(env, fetcher = fetch, limit = 10) {
             "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.5",
           },
           redirect: "follow",
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(10000),
         });
         const body = await response.text();
         const blocked = blockedReason(response.status, body);

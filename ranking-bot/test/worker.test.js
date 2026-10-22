@@ -127,17 +127,22 @@ test("anyone can ask for their own ID, which is how the owner is configured", as
 test("only the owner can ask for the ranking on demand", async () => {
   const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
   await callback(worker, baseEnv, [event("排行", OWNER)]);
-  assert.equal(h.sent.length, 1);
-  assert.match(h.sent[0].body.messages[0].text, /TOP 10/);
+  assert.equal(h.sent.length, 2);
+  assert.equal(h.sent[0].url, "/v2/bot/message/reply");
+  assert.match(h.sent[0].body.messages[0].text, /查詢中/);
+  assert.equal(h.sent[1].url, "/v2/bot/message/push");
+  assert.equal(h.sent[1].body.to, OWNER);
+  assert.match(h.sent[1].body.messages[0].text, /TOP 10/);
   await callback(worker, baseEnv, [event("排行", OTHER)]);
   await callback(worker, baseEnv, [event("hello", OTHER)]);
-  assert.equal(h.sent.length, 1, "strangers get no reply and no data");
+  assert.equal(h.sent.length, 2, "strangers get no reply and no data");
 });
 
 test("with no owner configured every friend can ask for the ranking", async () => {
   const h = harness(); const worker = createWorker({ fetcher: h.fetcher });
   await callback(worker, { ...baseEnv, OWNER_LINE_USER_ID: "" }, [event("排行", OTHER)]);
-  assert.match(h.sent[0].body.messages[0].text, /TOP 10/);
+  assert.match(h.sent[0].body.messages[0].text, /查詢中/);
+  assert.match(h.sent[1].body.messages[0].text, /TOP 10/);
 });
 
 test("the owner gets a short help text for anything else; groups and non-text events are ignored", async () => {

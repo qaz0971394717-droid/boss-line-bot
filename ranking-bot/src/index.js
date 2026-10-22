@@ -123,8 +123,11 @@ export function createWorker({ fetcher = fetch } = {}) {
             if (text === "我的ID") {
               await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "（目前所有好友都會收到推播）"}`);
             } else if (allowed && /^(排行|今日|今天|top|TOP|現在)$/.test(text)) {
+              // The reply token expires within about a minute and the site can be slow, so
+              // acknowledge at once and deliver the ranking as a push.
+              await reply(env, fetcher, event.replyToken, "查詢中，請稍候…");
               const { text: message } = await buildMessage(env, fetcher);
-              await reply(env, fetcher, event.replyToken, message);
+              await pushText(env, fetcher, userId, message);
             } else if (allowed) {
               await reply(env, fetcher, event.replyToken, "每天早上 8 點會自動推播前 10 名。\n輸入「排行」可以立即查看。");
             }
