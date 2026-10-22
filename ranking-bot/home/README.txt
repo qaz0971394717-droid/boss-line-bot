@@ -1,5 +1,5 @@
-簡單版：
-1. 安裝 Node.js（https://nodejs.org ，下載 LTS，一直按下一步）
-2. 把 ranking-bot 資料夾解壓縮到 C:\ 底下
-3. 進入資料夾，按兩下 setup.bat，照畫面做
-取消每天自動執行：命令提示字元輸入  schtasks /Delete /TN "DailyRanking" /F
+1. Install Node.js LTS (https://nodejs.org) and Google Chrome.
+2. Unzip the ranking-bot folder to C:\
+3. Double-click setup.bat
+Cancel the daily task:  schtasks /Delete /TN "DailyRanking" /F
+Visible-browser mode (if headless is blocked): add SHOW_BROWSER=1 to home\.env

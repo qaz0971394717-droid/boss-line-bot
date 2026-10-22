@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { chromium } from "playwright-core";
 import { buildMessage, runDaily } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,16 +19,40 @@ try {
   process.exit(2);
 }
 
-if (process.argv.includes("--dry")) {
-  const { text } = await buildMessage(env, fetch);
-  console.log(text);
-} else {
+// The site refuses plain HTTP clients even from a home connection, so the ranking page is
+// opened in a real Chrome (installed on this computer) and LINE calls use normal fetch.
+let browser;
+async function browserFetch(url, init) {
+  if (/line\.me|127\.0\.0\.1:\d+\/v2/.test(url) || env.LINE_API_BASE && url.startsWith(env.LINE_API_BASE)) return fetch(url, init);
+  browser ??= await chromium.launch({
+    headless: env.SHOW_BROWSER !== "1",
+    ...(env.CHROME_PATH ? { executablePath: env.CHROME_PATH } : { channel: "chrome" }),
+  });
+  const page = await browser.newPage({ locale: "zh-TW" });
   try {
-    const out = await runDaily(env, fetch);
-    console.log(JSON.stringify(out));
-    if (!out.pushed) process.exit(2);
-  } catch (error) {
-    console.error("推播失敗：", error?.message || error);
-    process.exit(1);
+    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // give an anti-bot "checking your browser" page a chance to finish
+    for (let i = 0; i < 10 && /Just a moment|請稍候|Attention Required/i.test(await page.title()); i++) await page.waitForTimeout(2000);
+    const status = /Just a moment|Attention Required/i.test(await page.title()) ? 403 : response?.status() ?? 0;
+    const body = await page.content();
+    return { status, ok: status < 400, url: page.url(), text: async () => body };
+  } finally {
+    await page.close();
   }
+}
+
+try {
+  if (process.argv.includes("--dry")) {
+    const { text } = await buildMessage(env, browserFetch);
+    console.log(text);
+  } else {
+    const out = await runDaily(env, browserFetch);
+    console.log(JSON.stringify(out));
+    if (!out.pushed) process.exitCode = 2;
+  }
+} catch (error) {
+  console.error("執行失敗：", error?.message || error);
+  process.exitCode = 1;
+} finally {
+  await browser?.close();
 }
