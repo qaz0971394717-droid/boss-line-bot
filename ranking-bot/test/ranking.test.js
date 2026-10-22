@@ -147,21 +147,24 @@ test("a network error is retried once before giving up", async () => {
 
 const NOW = new Date("2026-10-22T00:00:00Z");
 
-test("the message lists ten lines with number, code and title", () => {
+test("each entry is a code line plus a short title line, separated by a blank line", () => {
   const items = Array.from({ length: 10 }, (_, i) => ({ code: `SSIS-${100 + i}`, title: `標題${i + 1}` }));
   const text = formatRanking({ ok: true, items }, { now: NOW });
   const lines = text.split("\n");
   assert.equal(lines[0], "📊 今日熱門 TOP 10");
   assert.equal(lines[1], "2026-10-22 08:00");
+  assert.equal(lines[3], "1. SSIS-100");
+  assert.equal(lines[4], "標題1");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "2. SSIS-101");
   assert.equal(lines.filter((l) => /^\d+\. /.test(l)).length, 10);
-  assert.equal(lines[3], "1. SSIS-100｜標題1");
-  assert.equal(lines[12], "10. SSIS-109｜標題10");
+  assert.ok(text.endsWith("10. SSIS-109\n標題10"));
   assert.doesNotMatch(text, /http/);
 });
 
 test("long titles are shortened and a partial result is flagged", () => {
   const text = formatRanking({ ok: true, items: [{ code: "AAA-111", title: "長".repeat(200) }] }, { now: NOW });
-  assert.match(text, /1\. AAA-111｜長{79}…/);
+  assert.match(text, /1\. AAA-111\n長{39}…/);
   assert.match(text, /只解析到 1 筆（預期 10 筆）/);
 });
 

@@ -155,9 +155,10 @@ export function formatRanking(result, { label = "今日熱門", now = new Date()
   if (!result.ok)
     return `⚠️ ${label} TOP ${limit}：今天抓不到\n${stamp}\n\n${result.reason}\n\n（沒有推播空的排行，網站恢復後會自動繼續）`;
   const lines = result.items.slice(0, limit).map((item, i) => {
-    const title = item.title.length > 80 ? item.title.slice(0, 79) + "…" : item.title;
-    return `${i + 1}. ${item.code}${title ? "｜" + title : ""}`;
+    // code on its own line and a short title under it, so phone screens do not run entries together
+    const title = item.title.length > 40 ? item.title.slice(0, 39) + "…" : item.title;
+    return `${i + 1}. ${item.code}${title ? "\n" + title : ""}`;
   });
   const note = result.items.length < limit ? `\n\n⚠️ 只解析到 ${result.items.length} 筆（預期 ${limit} 筆），網站版面可能有變動。` : "";
-  return `📊 ${label} TOP ${limit}\n${stamp}\n\n${lines.join("\n")}${note}`;
+  return `📊 ${label} TOP ${limit}\n${stamp}\n\n${lines.join("\n\n")}${note}`;
 }

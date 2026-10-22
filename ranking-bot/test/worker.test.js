@@ -41,7 +41,7 @@ test("the daily run pushes the ranking to the owner only", async () => {
   const text = h.sent[0].body.messages[0].text;
   assert.match(text, /今日熱門 TOP 10/);
   assert.match(text, /2026-10-22 08:00/);
-  assert.match(text, /10\. SSIS-109｜片名10/);
+  assert.match(text, /10\. SSIS-109\n片名10/);
 });
 
 test("when the site cannot be read the owner is told, not left waiting", async () => {
