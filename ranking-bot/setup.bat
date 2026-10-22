@@ -19,6 +19,7 @@ set /p TOKEN=
 echo.
 echo Testing with Chrome (nothing is sent to LINE)...
 echo --------------------------------
+set SHOW_BROWSER=1
 node home\run.mjs --dry
 echo --------------------------------
 echo.

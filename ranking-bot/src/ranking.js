@@ -78,7 +78,9 @@ export function parseRanking(html, base, limit = 10) {
       attr(m[1], "title") ||
       attr(m[1], "alt") ||
       stripTags(m[2]);
-    const title = cleanTitle(decodeEntities(raw), code);
+    let title = cleanTitle(decodeEntities(raw), code);
+    // poster links often carry only the running time ("2:04:29"), which is not a title
+    if (/^[\d:：\s]+$/.test(title)) title = "";
     // a bare navigation link has neither an image nor a readable title
     if (!img && title.length < 2) continue;
     const existing = found.get(code);

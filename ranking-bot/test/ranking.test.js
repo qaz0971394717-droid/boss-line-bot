@@ -45,6 +45,15 @@ test("a Jable-style listing parses: image link without alt, then a title link", 
   assert.deepEqual(items.map((i) => i.title), ["標題0", "標題1", "標題2"]);
 });
 
+test("a poster link that only shows the running time does not become the title", () => {
+  const html = page(
+    `<a href="/videos/snos-363/"><img data-src="x"><span class="label">2:04:29</span></a>` +
+    `<h6><a href="/videos/snos-363/">SNOS-363 真正的片名</a></h6>` +
+    `<a href="/videos/adn-799/"><span>2:34:04</span></a>`,
+  );
+  assert.deepEqual(parseRanking(html, "https://jable.tv/hot/"), [{ code: "SNOS-363", title: "真正的片名" }]);
+});
+
 test("the first ten distinct codes are returned in page order, navigation ignored", () => {
   const items = parseRanking(page(cards(14)), BASE);
   assert.equal(items.length, 10);
