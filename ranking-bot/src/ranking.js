@@ -3,8 +3,8 @@
 // failure is reported with a reason instead of being hidden.
 
 export const DEFAULT_URLS = [
-  "https://missav.ws/cn/today-hot",
-  "https://missav.com/cn/today-hot",
+  "https://missav.ws/dm301/today-hot",
+  "https://missav.com/dm301/today-hot",
 ];
 
 const CODE_PATTERNS = [
