@@ -51,7 +51,7 @@ test("a poster link that only shows the running time does not become the title",
     `<h6><a href="/videos/snos-363/">SNOS-363 真正的片名</a></h6>` +
     `<a href="/videos/adn-799/"><span>2:34:04</span></a>`,
   );
-  assert.deepEqual(parseRanking(html, "https://jable.tv/hot/"), [{ code: "SNOS-363", title: "真正的片名" }]);
+  assert.deepEqual(parseRanking(html, "https://jable.tv/hot/"), [{ code: "SNOS-363", title: "真正的片名", url: "https://jable.tv/videos/snos-363/" }]);
 });
 
 test("the first ten distinct codes are returned in page order, navigation ignored", () => {
@@ -159,7 +159,14 @@ test("each entry is a code line plus a short title line, separated by a blank li
   assert.equal(lines[6], "2. SSIS-101");
   assert.equal(lines.filter((l) => /^\d+\. /.test(l)).length, 10);
   assert.ok(text.endsWith("10. SSIS-109\n標題10"));
-  assert.doesNotMatch(text, /http/);
+  assert.doesNotMatch(text, /http/, "no link when the item has none");
+});
+
+test("the video link follows the title when the page provides one", () => {
+  const items = parseRanking(page(`<a href="/videos/ssis-123/"><img alt="SSIS-123 片名"></a>`), "https://jable.tv/hot/");
+  assert.equal(items[0].url, "https://jable.tv/videos/ssis-123/");
+  const text = formatRanking({ ok: true, items }, { now: NOW });
+  assert.match(text, /1\. SSIS-123\n片名\nhttps:\/\/jable\.tv\/videos\/ssis-123\//);
 });
 
 test("long titles are shortened and a partial result is flagged", () => {
