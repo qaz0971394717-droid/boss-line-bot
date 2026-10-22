@@ -61,6 +61,14 @@ export function cleanTitle(title, code) {
   return t;
 }
 
+// Jable titles end with the actress ("… 雛形美久流"). Only a short plain-name tail counts.
+export function actressFromTitle(title) {
+  const tail = String(title || "").trim().split(/\s+/).slice(1).pop() ?? "";
+  if (tail.length < 2 || tail.length > 10) return "";
+  if (/[\d「」『』！？!?…～~，,。.：:()（）]/.test(tail)) return "";
+  return tail;
+}
+
 export function parseRanking(html, base, limit = 10) {
   // Many sites link the same video twice (poster, then title); keep first-seen order and
   // take the title from whichever link has one.
@@ -157,7 +165,8 @@ export function formatRanking(result, { label = "今日熱門", now = new Date()
   const lines = result.items.slice(0, limit).map((item, i) => {
     // code on its own line and a short title under it, so phone screens do not run entries together
     const title = item.title.length > 40 ? item.title.slice(0, 39) + "…" : item.title;
-    return `${i + 1}. ${item.code}${title ? "\n" + title : ""}${item.url ? "\n" + item.url : ""}`;
+    const actress = actressFromTitle(item.title);
+    return `${i + 1}. ${item.code}${title ? "\n" + title : ""}${actress ? "\n👩 " + actress : ""}${item.url ? "\n" + item.url : ""}`;
   });
   const note = result.items.length < limit ? `\n\n⚠️ 只解析到 ${result.items.length} 筆（預期 ${limit} 筆），網站版面可能有變動。` : "";
   return `📊 ${label} TOP ${limit}\n${stamp}\n\n${lines.join("\n\n")}${note}`;

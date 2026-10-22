@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  blockedReason, cleanTitle, codeFromHref, decodeEntities,
+  actressFromTitle, blockedReason, cleanTitle, codeFromHref, decodeEntities,
   fetchRanking, formatRanking, parseRanking,
 } from "../src/ranking.js";
 
@@ -167,6 +167,24 @@ test("the video link follows the title when the page provides one", () => {
   assert.equal(items[0].url, "https://jable.tv/videos/ssis-123/");
   const text = formatRanking({ ok: true, items }, { now: NOW });
   assert.match(text, /1\. SSIS-123\n片名\nhttps:\/\/jable\.tv\/videos\/ssis-123\//);
+});
+
+test("the actress is the trailing name of a real Jable title, and only when it looks like a name", () => {
+  const real = {
+    "女兒的朋友明明是娃娃臉…身高卻是170cm！胸部還是I罩杯巨乳！發育太誇張了大叔我都快忍耐不下去了啊～ 雛形美久流": "雛形美久流",
+    "早晨醒來時睡在旁邊的竟是公司的巨乳女前輩。平時總是嚴厲發火的前輩，卻用撒嬌的聲音對我說：「要繼續昨天的事情嗎？」 海老咲碧": "海老咲碧",
+    "男だらけの合宿先で慣れないお酒を飲まされたチア部のちっちゃかわいい女の子は朝までずーっと射精穴。 宇野小春": "宇野小春",
+    "女朋友的超正姊姊用巨乳和無套內射來誘惑我 彩月七緒": "彩月七緒",
+    "最喜歡的巨乳女孩和好友交往了，還被拜託擔任他們幹砲影片攝影師的憂鬱的我。 但是……這是我人生中最金槍不倒的時候。 安達夕莉": "安達夕莉",
+    "射精無限大Iカップソープ 必ず10発抜いてくれる！密着奉仕で搾り取る神乳ボディ！ 小笠原菜乃": "小笠原菜乃",
+  };
+  for (const [title, name] of Object.entries(real)) assert.equal(actressFromTitle(title), name);
+  assert.equal(actressFromTitle("沒有空白的標題"), "");
+  assert.equal(actressFromTitle("只有一段文字描述，結尾是句子。"), "");
+  assert.equal(actressFromTitle("很長的標題 是不是這樣的一句非常長的結尾文字"), "");
+  assert.equal(actressFromTitle(""), "");
+  const text = formatRanking({ ok: true, items: [{ code: "AAA-111", title: "標題 某某某", url: "https://x.test/a" }] }, { now: NOW });
+  assert.match(text, /1\. AAA-111\n標題 某某某\n👩 某某某\nhttps:\/\/x\.test\/a/);
 });
 
 test("long titles are shortened and a partial result is flagged", () => {
