@@ -1,0 +1,7 @@
+name = "daily-ranking-bot"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# 08:00 Asia/Taipei = 00:00 UTC
+[triggers]
+crons = ["0 0 * * *"]

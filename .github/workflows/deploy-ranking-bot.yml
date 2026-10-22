@@ -1,0 +1,65 @@
+name: Deploy daily ranking bot
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['ranking-bot/**', '.github/workflows/deploy-ranking-bot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: daily-ranking-bot-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ranking-bot
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RANKING_LINE_CHANNEL_SECRET: ${{ secrets.RANKING_LINE_CHANNEL_SECRET }}
+      RANKING_LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.RANKING_LINE_CHANNEL_ACCESS_TOKEN }}
+      RANKING_OWNER_LINE_USER_ID: ${{ secrets.RANKING_OWNER_LINE_USER_ID }}
+      RANKING_SOURCE_URL: ${{ secrets.RANKING_SOURCE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Check required secrets
+        id: gate
+        run: |
+          if [ -z "$RANKING_LINE_CHANNEL_SECRET" ] || [ -z "$RANKING_LINE_CHANNEL_ACCESS_TOKEN" ]; then
+            echo "Ranking bot LINE secrets are not set yet; skipping deploy (tests passed)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy Worker
+        if: steps.gate.outputs.ready == 'true'
+        run: npx wrangler deploy
+      - name: Set secrets and optional settings
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          node --input-type=module -e 'const {execFileSync}=await import("node:child_process");const put=(k,v)=>execFileSync("./node_modules/.bin/wrangler",["secret","put",k],{input:v,stdio:["pipe","pipe","pipe"]});put("LINE_CHANNEL_SECRET",process.env.RANKING_LINE_CHANNEL_SECRET);put("LINE_CHANNEL_ACCESS_TOKEN",process.env.RANKING_LINE_CHANNEL_ACCESS_TOKEN);if(process.env.RANKING_OWNER_LINE_USER_ID)put("OWNER_LINE_USER_ID",process.env.RANKING_OWNER_LINE_USER_ID);if(process.env.RANKING_SOURCE_URL)put("RANKING_SOURCE_URL",process.env.RANKING_SOURCE_URL);console.log("Secrets configured without disclosure.");'
+      - name: Connect and verify LINE webhook
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          node --input-type=module <<'JS'
+          const base='https://daily-ranking-bot.qaz0971394717.workers.dev',endpoint=base+'/callback';
+          const token=process.env.RANKING_LINE_CHANNEL_ACCESS_TOKEN;
+          const line=async(path,method='GET',body)=>{const r=await fetch('https://api.line.me/v2/bot/'+path,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('LINE setup failed: '+r.status);return r.json();};
+          let health;
+          for(let i=0;i<12;i++){try{const r=await fetch(base,{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});if(r.ok){health=await r.json();if(health.line_configured)break;}}catch{}await new Promise(r=>setTimeout(r,5000));}
+          if(!health?.line_configured)throw Error('Worker health check failed');
+          const old=await fetch('https://api.line.me/v2/bot/channel/webhook/endpoint',{headers:{Authorization:'Bearer '+token},redirect:'error',signal:AbortSignal.timeout(15000)});
+          if(old.ok){const s=await old.json();if(s.endpoint&&s.endpoint!==endpoint)throw Error('Refusing to replace a different bot webhook');}else if(old.status!==404)throw Error('LINE authorization failed');
+          await line('channel/webhook/endpoint','PUT',{endpoint});
+          const t=await line('channel/webhook/test','POST',{endpoint});
+          if(!t.success)throw Error('LINE signature/webhook test failed');
+          console.log('PASS: webhook verified. Owner configured: '+health.owner_configured+' (daily push needs this).');
+          JS
