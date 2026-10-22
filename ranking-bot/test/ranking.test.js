@@ -37,6 +37,14 @@ test("entities are decoded and titles lose the repeated code", () => {
   assert.equal(cleanTitle("標題 SSIS-123", "SSIS-123"), "標題 SSIS-123");
 });
 
+test("a Jable-style listing parses: image link without alt, then a title link", () => {
+  const html = Array.from({ length: 3 }, (_, i) =>
+    `<div class="video-img-box"><div class="img-box"><a href="https://jable.tv/videos/ssis-30${i}/"><img data-src="x.jpg"></a></div><div class="detail"><h6 class="title"><a href="https://jable.tv/videos/ssis-30${i}/">SSIS-30${i} 標題${i}</a></h6></div></div>`).join("");
+  const items = parseRanking(page(html), "https://jable.tv/hot/");
+  assert.deepEqual(items.map((i) => i.code), ["SSIS-300", "SSIS-301", "SSIS-302"]);
+  assert.deepEqual(items.map((i) => i.title), ["標題0", "標題1", "標題2"]);
+});
+
 test("the first ten distinct codes are returned in page order, navigation ignored", () => {
   const items = parseRanking(page(cards(14)), BASE);
   assert.equal(items.length, 10);
@@ -92,7 +100,7 @@ test("fetchRanking returns items from the first source that works", async () => 
 test("fetchRanking falls back to the next source when the first is blocked", async () => {
   const calls = [];
   const fetcher = async (url) => { calls.push(url); return url.includes("missav.ws") ? res(403, "", url) : res(200, page(cards(10)), url); };
-  const r = await fetchRanking({}, fetcher);
+  const r = await fetchRanking({ RANKING_SOURCE_URL: "https://missav.ws/a, https://other.test/b" }, fetcher);
   assert.equal(r.ok, true);
   assert.equal(calls.length, 2, "a blocked page is not retried");
 });
@@ -101,8 +109,7 @@ test("fetchRanking explains every failure when nothing works", async () => {
   const fetcher = async (url) => res(403, "", url);
   const r = await fetchRanking({}, fetcher);
   assert.equal(r.ok, false);
-  assert.match(r.reason, /missav\.ws：網站拒絕存取（HTTP 403）/);
-  assert.match(r.reason, /missav\.com：網站拒絕存取（HTTP 403）/);
+  assert.match(r.reason, /網站拒絕存取（HTTP 403）/);
 });
 
 test("a configured source URL replaces the defaults", async () => {
@@ -117,6 +124,8 @@ test("a changed page layout is reported as such", async () => {
   const r = await fetchRanking({ RANKING_SOURCE_URL: "https://my.test/hot" }, fetcher);
   assert.equal(r.ok, false);
   assert.match(r.reason, /找不到影片清單/);
+  const gated = await fetchRanking({ RANKING_SOURCE_URL: "https://my.test/hot" }, async (url) => res(200, "<html><title>Age &amp; verify</title></html>", url));
+  assert.match(gated.reason, /頁面標題：Age & verify/);
 });
 
 test("a network error is retried once before giving up", async () => {

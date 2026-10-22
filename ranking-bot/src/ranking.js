@@ -2,10 +2,7 @@
 // The page layout is not under our control, so extraction is deliberately generic and every
 // failure is reported with a reason instead of being hidden.
 
-export const DEFAULT_URLS = [
-  "https://missav.ws/dm301/today-hot",
-  "https://missav.com/dm301/today-hot",
-];
+export const DEFAULT_URLS = ["https://jable.tv/hot/"];
 
 const CODE_PATTERNS = [
   /^(fc2-ppv-\d{5,9})(?:-.*)?$/i,
@@ -65,15 +62,16 @@ export function cleanTitle(title, code) {
 }
 
 export function parseRanking(html, base, limit = 10) {
-  const items = [];
-  const seen = new Set();
+  // Many sites link the same video twice (poster, then title); keep first-seen order and
+  // take the title from whichever link has one.
+  const found = new Map();
   const anchor = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let m;
-  while ((m = anchor.exec(html)) && items.length < limit) {
+  while ((m = anchor.exec(html))) {
     const href = attr(m[1], "href");
     if (!href) continue;
     const code = codeFromHref(href, base);
-    if (!code || seen.has(code)) continue;
+    if (!code) continue;
     const img = m[2].match(/<img\b([^>]*)>/i);
     const raw =
       (img && (attr(img[1], "alt") || attr(img[1], "title"))) ||
@@ -83,10 +81,11 @@ export function parseRanking(html, base, limit = 10) {
     const title = cleanTitle(decodeEntities(raw), code);
     // a bare navigation link has neither an image nor a readable title
     if (!img && title.length < 2) continue;
-    seen.add(code);
-    items.push({ code, title });
+    const existing = found.get(code);
+    if (!existing) found.set(code, { code, title });
+    else if (!existing.title && title) existing.title = title;
   }
-  return items;
+  return [...found.values()].filter((item) => item.title).slice(0, limit);
 }
 
 export function blockedReason(status, body) {
@@ -98,8 +97,16 @@ export function blockedReason(status, body) {
   return null;
 }
 
+// What the page actually said, so a changed layout or a gate page can be recognised from the alert.
+export function pageHint(body) {
+  const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(body || "")?.[1];
+  const text = decodeEntities(String(title || "").replace(/\s+/g, " ").trim());
+  return text ? `（頁面標題：${text.slice(0, 60)}）` : "";
+}
+
 export async function fetchRanking(env, fetcher = fetch, limit = 10) {
-  const urls = env.RANKING_SOURCE_URL ? [env.RANKING_SOURCE_URL] : DEFAULT_URLS;
+  const configured = String(env.RANKING_SOURCE_URL || "").split(",").map((u) => u.trim()).filter(Boolean);
+  const urls = configured.length ? configured : DEFAULT_URLS;
   const failures = [];
   for (const url of urls) {
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -122,7 +129,7 @@ export async function fetchRanking(env, fetcher = fetch, limit = 10) {
         }
         const items = parseRanking(body, response.url || url, limit);
         if (items.length) return { ok: true, items, url };
-        failures.push(`${new URL(url).host}：頁面讀取成功但找不到影片清單（網站版面可能改了）`);
+        failures.push(`${new URL(url).host}：頁面讀取成功但找不到影片清單（網站版面可能改了）${pageHint(body)}`);
         break;
       } catch (error) {
         failures.push(`${new URL(url).host}：連線失敗（${error?.name || "error"}）`);
