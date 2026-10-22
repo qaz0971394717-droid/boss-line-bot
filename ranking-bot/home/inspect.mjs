@@ -34,7 +34,7 @@ try {
   const first = parseRanking(hot, hotUrl, 1)[0];
   if (!first?.url) throw new Error("ranking page had no videos");
   const video = await open(first.url, "sample-video.html");
-  const model = /href="([^"]*\/models\/[^"]*)"/i.exec(video)?.[1];
+  const model = /<a[^>]*class="model"[^>]*href="([^"]*)"|<a[^>]*href="([^"]*\/models\/[0-9a-f]{20,}[^"]*)"[^>]*class="model"/i.exec(video)?.slice(1).find(Boolean);
   if (model) await open(new URL(model, first.url).href, "sample-model.html");
   else console.log("video page has no /models/ link");
 } catch (error) {
