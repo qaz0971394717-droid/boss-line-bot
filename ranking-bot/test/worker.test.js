@@ -72,6 +72,34 @@ test("videos sent recently are skipped and replaced by the next ones on the page
   assert.doesNotMatch(text, /版面可能有變動/);
 });
 
+test("when the first page has too few new videos the next page is used to fill up", async () => {
+  const pages = { "https://my.test/today": html(4), "https://my.test/week": html(14) };
+  const h = harness({ site: (url) => ({ status: 200, body: pages[url] }) });
+  const env = { ...baseEnv, RANKING_SOURCE_URL: "https://my.test/today, https://my.test/week" };
+  const out = await runDaily(env, h.fetcher, new Date(), { exclude: new Set(["SSIS-100", "SSIS-101"]) });
+  assert.equal(out.count, 10);
+  assert.deepEqual(out.codes.slice(0, 3), ["SSIS-102", "SSIS-103", "SSIS-104"]);
+  assert.equal(new Set(out.codes).size, 10, "no code appears twice across pages");
+});
+
+test("the second page is not requested when the first already gives ten new videos", async () => {
+  const calls = [];
+  const h = harness({ site: (url) => { calls.push(url); return { status: 200, body: html(14) }; } });
+  const env = { ...baseEnv, RANKING_SOURCE_URL: "https://my.test/today,https://my.test/week" };
+  await runDaily(env, h.fetcher, new Date(), { exclude: new Set(["SSIS-100"]) });
+  assert.deepEqual(calls, ["https://my.test/today"]);
+});
+
+test("one page failing does not stop the other from supplying videos; all failing is reported", async () => {
+  const mixed = harness({ site: (url) => (url.endsWith("today") ? { status: 403, body: "" } : { status: 200, body: html(12) }) });
+  const env = { ...baseEnv, RANKING_SOURCE_URL: "https://my.test/today,https://my.test/week" };
+  assert.equal((await runDaily(env, mixed.fetcher, new Date(), { exclude: new Set(["X-1"]) })).count, 10);
+  const down = harness({ site: () => ({ status: 403, body: "" }) });
+  const out = await runDaily(env, down.fetcher, new Date(), { exclude: new Set(["X-1"]) });
+  assert.equal(out.ok, false);
+  assert.match(down.sent[0].body.messages[0].text, /今天抓不到/);
+});
+
 test("when everything on the page was already sent, the owner is told instead of getting a repeat", async () => {
   const h = harness({ site: () => ({ status: 200, body: html(4) }) });
   const exclude = new Set(["SSIS-100", "SSIS-101", "SSIS-102", "SSIS-103"]);
