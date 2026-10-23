@@ -21,6 +21,9 @@ try {
 
 // The site refuses plain HTTP clients even from a home connection, so the ranking page is
 // opened in a real Chrome (installed on this computer) and LINE calls use normal fetch.
+const VERSION = "v14-tabs";
+const debug = (...a) => env.DEBUG === "1" && console.log("[診斷]", ...a);
+const firstSlugs = (html) => [...new Set([...html.matchAll(/\/videos\/([a-z0-9-]+)\//gi)].map((m) => m[1]))].slice(0, 4).join(", ");
 let browser;
 async function browserFetch(url, init) {
   if (/line\.me|127\.0\.0\.1:\d+\/v2/.test(url) || env.LINE_API_BASE && url.startsWith(env.LINE_API_BASE)) return fetch(url, init);
@@ -42,9 +45,12 @@ async function browserFetch(url, init) {
       const link = page.getByText(tab, { exact: true }).first();
       if (!(await link.count())) throw new Error(`找不到分頁「${tab}」`);
       const before = await page.content();
+      debug(`頁面「${tab}」點之前的前幾部：`, firstSlugs(before));
       await link.click({ timeout: 10000 });
-      for (let i = 0; i < 10 && (await page.content()) === before; i++) await page.waitForTimeout(1000);
+      let changed = false;
+      for (let i = 0; i < 10 && !changed; i++) { await page.waitForTimeout(1000); changed = (await page.content()) !== before; }
       await page.waitForTimeout(1500);
+      debug(`點了「${tab}」，頁面${changed ? "有" : "沒有"}變化；點之後的前幾部：`, firstSlugs(await page.content()));
     }
     const body = await page.content();
     return { status, ok: status < 400, url: page.url(), text: async () => body };
@@ -64,6 +70,7 @@ try {
 const exclude = new Set(Object.entries(sent).filter(([, at]) => Date.now() - at < SKIP_DAYS * DAY).map(([code]) => code));
 
 try {
+  debug("程式版本", VERSION, "；已記錄近期番號數", exclude.size);
   if (process.argv.includes("--dry")) {
     const { text } = await buildMessage(env, browserFetch, new Date(), { exclude });
     console.log(text);
