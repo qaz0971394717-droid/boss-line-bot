@@ -158,7 +158,7 @@ const taipei = (date) =>
     hour: "2-digit", minute: "2-digit", hourCycle: "h23",
   }).format(date);
 
-export function formatRanking(result, { label = "今日熱門", now = new Date(), limit = 10 } = {}) {
+export function formatRanking(result, { label = "今日熱門", now = new Date(), limit = 10, skipped = 0 } = {}) {
   const stamp = taipei(now);
   if (!result.ok)
     return `⚠️ ${label} TOP ${limit}：今天抓不到\n${stamp}\n\n${result.reason}\n\n（沒有推播空的排行，網站恢復後會自動繼續）`;
@@ -168,6 +168,10 @@ export function formatRanking(result, { label = "今日熱門", now = new Date()
     const actress = actressFromTitle(item.title);
     return `${i + 1}. ${item.code}${title ? "\n" + title : ""}${actress ? "\n👩 " + actress : ""}${item.url ? "\n" + item.url : ""}`;
   });
-  const note = result.items.length < limit ? `\n\n⚠️ 只解析到 ${result.items.length} 筆（預期 ${limit} 筆），網站版面可能有變動。` : "";
+  const note = skipped
+    ? `\n\nℹ️ 已略過 ${skipped} 部近幾天推播過的影片。`
+    : result.items.length < limit
+      ? `\n\n⚠️ 只解析到 ${result.items.length} 筆（預期 ${limit} 筆），網站版面可能有變動。`
+      : "";
   return `📊 ${label} TOP ${limit}\n${stamp}\n\n${lines.join("\n\n")}${note}`;
 }

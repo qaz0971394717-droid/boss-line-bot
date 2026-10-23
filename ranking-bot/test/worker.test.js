@@ -38,7 +38,8 @@ async function callback(worker, env, events, secret = SECRET) {
 test("the daily run pushes the ranking to the owner only", async () => {
   const h = harness();
   const out = await runDaily(baseEnv, h.fetcher, new Date("2026-10-22T00:00:00Z"));
-  assert.deepEqual({ ...out, text: undefined }, { pushed: true, mode: "owner", ok: true, count: 10, text: undefined });
+  assert.deepEqual({ ...out, text: undefined, codes: undefined }, { pushed: true, mode: "owner", ok: true, count: 10, text: undefined, codes: undefined });
+  assert.equal(out.codes.length, 10);
   assert.match(out.text, /TOP 10/);
   assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].url, "/v2/bot/message/push");
@@ -58,6 +59,35 @@ test("when the site cannot be read the owner is told, not left waiting", async (
   assert.match(h.sent[0].body.messages[0].text, /今天抓不到[\s\S]*HTTP 403/);
 });
 
+test("videos sent recently are skipped and replaced by the next ones on the page", async () => {
+  const h = harness({ site: () => ({ status: 200, body: html(15) }) });
+  const exclude = new Set(["SSIS-100", "SSIS-101", "SSIS-102"]);
+  const out = await runDaily(baseEnv, h.fetcher, new Date("2026-10-22T00:00:00Z"), { exclude });
+  assert.equal(out.count, 10);
+  assert.deepEqual(out.codes, Array.from({ length: 10 }, (_, i) => `SSIS-${103 + i}`));
+  const text = h.sent[0].body.messages[0].text;
+  assert.doesNotMatch(text, /SSIS-10[012]\b/);
+  assert.match(text, /1\. SSIS-103/);
+  assert.match(text, /已略過 3 部近幾天推播過的影片/);
+  assert.doesNotMatch(text, /版面可能有變動/);
+});
+
+test("when everything on the page was already sent, the owner is told instead of getting a repeat", async () => {
+  const h = harness({ site: () => ({ status: 200, body: html(4) }) });
+  const exclude = new Set(["SSIS-100", "SSIS-101", "SSIS-102", "SSIS-103"]);
+  const out = await runDaily(baseEnv, h.fetcher, new Date(), { exclude });
+  assert.equal(out.count, 0);
+  assert.match(h.sent[0].body.messages[0].text, /今天沒有新的影片[\s\S]*4 部/);
+});
+
+test("a failed fetch is still reported as a failure even with an exclusion list", async () => {
+  const h = harness({ site: () => ({ status: 403, body: "" }) });
+  const out = await runDaily(baseEnv, h.fetcher, new Date(), { exclude: new Set(["X-1"]) });
+  assert.equal(out.ok, false);
+  assert.deepEqual(out.codes, []);
+  assert.match(h.sent[0].body.messages[0].text, /今天抓不到/);
+});
+
 test("a partial ranking is still pushed with a warning", async () => {
   const h = harness({ site: () => ({ status: 200, body: html(6) }) });
   const out = await runDaily(baseEnv, h.fetcher);
@@ -69,7 +99,7 @@ test("without a valid owner ID the ranking is broadcast to every friend", async 
   for (const owner of ["", undefined, "not-an-id"]) {
     const h = harness();
     const out = await runDaily({ ...baseEnv, OWNER_LINE_USER_ID: owner }, h.fetcher);
-    assert.deepEqual({ ...out, text: undefined }, { pushed: true, mode: "broadcast", ok: true, count: 10, text: undefined });
+    assert.deepEqual({ ...out, text: undefined, codes: undefined }, { pushed: true, mode: "broadcast", ok: true, count: 10, text: undefined, codes: undefined });
     assert.equal(h.sent[0].url, "/v2/bot/message/broadcast");
     assert.equal("to" in h.sent[0].body, false);
     assert.match(h.sent[0].body.messages[0].text, /TOP 10/);

@@ -1,7 +1,7 @@
 // Runs on your own computer: fetches the ranking from your home connection and sends it to LINE.
 // Usage:  node home/run.mjs          send now
 //         node home/run.mjs --dry    only print the message, send nothing
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { chromium } from "playwright-core";
@@ -43,13 +43,29 @@ async function browserFetch(url, init) {
   }
 }
 
+// Codes sent in the last SKIP_DAYS days are not sent again.
+const SENT_FILE = join(here, "sent.json");
+const SKIP_DAYS = 7;
+const DAY = 86400000;
+let sent = {};
+try {
+  sent = JSON.parse(readFileSync(SENT_FILE, "utf8"));
+} catch {}
+const exclude = new Set(Object.entries(sent).filter(([, at]) => Date.now() - at < SKIP_DAYS * DAY).map(([code]) => code));
+
 try {
   if (process.argv.includes("--dry")) {
-    const { text } = await buildMessage(env, browserFetch);
+    const { text } = await buildMessage(env, browserFetch, new Date(), { exclude });
     console.log(text);
   } else {
-    const out = await runDaily(env, browserFetch);
-    console.log(JSON.stringify({ ...out, text: undefined }));
+    const out = await runDaily(env, browserFetch, new Date(), { exclude });
+    console.log(JSON.stringify({ ...out, text: undefined, codes: undefined }));
+    if (out.pushed && out.ok) {
+      const now = Date.now();
+      for (const code of out.codes) sent[code] = now;
+      for (const [code, at] of Object.entries(sent)) if (now - at > 3 * SKIP_DAYS * DAY) delete sent[code];
+      writeFileSync(SENT_FILE, JSON.stringify(sent));
+    }
     if (!out.pushed) process.exitCode = 2;
     // leave a copy in the cloud so typing "排行" in LINE shows today's list
     if (out.ok) {

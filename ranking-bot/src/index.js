@@ -54,18 +54,31 @@ export async function pushText(env, fetcher, to, text) {
   }
 }
 
-export async function buildMessage(env, fetcher, now = new Date()) {
-  const result = await fetchRanking(env, fetcher);
-  return { result, text: formatRanking(result, { label: env.RANKING_LABEL || "今日熱門", now }) };
+// `exclude` = codes already sent recently. The page is read deeper than ten entries so that, after
+// skipping those, up to ten new videos can still be listed.
+export async function buildMessage(env, fetcher, now = new Date(), { exclude = new Set(), limit = 10 } = {}) {
+  const fetched = await fetchRanking(env, fetcher, exclude.size ? 60 : limit);
+  let result = fetched, skipped = 0;
+  if (fetched.ok && exclude.size) {
+    const fresh = fetched.items.filter((item) => !exclude.has(item.code));
+    skipped = fetched.items.length - fresh.length;
+    result = { ...fetched, items: fresh.slice(0, limit) };
+  }
+  const label = env.RANKING_LABEL || "今日熱門";
+  const text = result.ok && !result.items.length && skipped
+    ? `📭 ${label}：今天沒有新的影片\n\n排行裡的 ${skipped} 部都是近幾天推播過的，所以今天不重複推。`
+    : formatRanking(result, { label, now, skipped });
+  return { result, text };
 }
 
-export async function runDaily(env, fetcher = fetch, now = new Date()) {
+export async function runDaily(env, fetcher = fetch, now = new Date(), opts = {}) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) return { pushed: false, reason: "not-configured" };
   // A valid owner ID narrows delivery to one person; without it everyone who added the bot gets it.
   const owner = OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || "") ? env.OWNER_LINE_USER_ID : null;
-  const { result, text } = await buildMessage(env, fetcher, now);
+  const { result, text } = await buildMessage(env, fetcher, now, opts);
   await pushText(env, fetcher, owner, text);
-  return { pushed: true, mode: owner ? "owner" : "broadcast", ok: result.ok, count: result.ok ? result.items.length : 0, text };
+  const codes = result.ok ? result.items.map((item) => item.code) : [];
+  return { pushed: true, mode: owner ? "owner" : "broadcast", ok: result.ok, count: codes.length, codes, text };
 }
 
 const taipeiDay = (ms) =>
