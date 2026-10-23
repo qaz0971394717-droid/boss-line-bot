@@ -3,7 +3,13 @@
 // failure is reported with a reason instead of being hidden.
 
 // Tried in this order; later pages only fill up when the earlier ones have too few new videos.
-export const DEFAULT_URLS = ["https://jable.tv/hot/", "https://missav.ws/dm301/today-hot"];
+// "#今日熱門" = open the page, then click the tab with that name (the site switches tabs without
+// changing the address, and /hot/ itself opens on the weekly tab).
+export const DEFAULT_URLS = [
+  "https://jable.tv/hot/#今日熱門",
+  "https://jable.tv/hot/#本週熱門",
+  "https://missav.ws/dm301/today-hot",
+];
 
 const CODE_PATTERNS = [
   /^(fc2-ppv-\d{5,9})(?:-.*)?$/i,
@@ -143,7 +149,7 @@ export async function fetchRanking(env, fetcher = fetch, limit = 10) {
         failures.push(`${new URL(url).host}：頁面讀取成功但找不到影片清單（網站版面可能改了）${pageHint(body)}`);
         break;
       } catch (error) {
-        failures.push(`${new URL(url).host}：連線失敗（${error?.name || "error"}）`);
+        failures.push(`${new URL(url).host}：連線失敗（${error?.name === "Error" && error.message ? error.message : error?.name || "error"}）`);
         if (attempt === 2) break;
         await new Promise((r) => setTimeout(r, 1500));
       }

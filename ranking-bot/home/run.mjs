@@ -32,10 +32,20 @@ async function browserFetch(url, init) {
   });
   const page = await browser.newPage({ locale: "zh-TW" });
   try {
-    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // "...#今日熱門": after loading, click the tab with that name and wait for the list to change
+    const tab = decodeURIComponent(new URL(url).hash.slice(1));
+    const response = await page.goto(url.split("#")[0], { waitUntil: "domcontentloaded", timeout: 30000 });
     // give an anti-bot "checking your browser" page a chance to finish
     for (let i = 0; i < 10 && /Just a moment|請稍候|Attention Required/i.test(await page.title()); i++) await page.waitForTimeout(2000);
     const status = /Just a moment|Attention Required/i.test(await page.title()) ? 403 : response?.status() ?? 0;
+    if (tab && status < 400) {
+      const link = page.getByText(tab, { exact: true }).first();
+      if (!(await link.count())) throw new Error(`找不到分頁「${tab}」`);
+      const before = await page.content();
+      await link.click({ timeout: 10000 });
+      for (let i = 0; i < 10 && (await page.content()) === before; i++) await page.waitForTimeout(1000);
+      await page.waitForTimeout(1500);
+    }
     const body = await page.content();
     return { status, ok: status < 400, url: page.url(), text: async () => body };
   } finally {
