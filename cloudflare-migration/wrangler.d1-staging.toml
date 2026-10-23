@@ -1,0 +1,27 @@
+name = "hit2-boss-staging"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+[vars]
+ENABLE_ADMIN_ACTOR_GUARD = "true"
+ENABLE_BIRTHDAY_SURPRISE = "false"
+ENABLE_OVERWRITE_GUARD = "true"
+ENABLE_UNDO_BUTTON = "true"
+ENABLE_UNDO = "true"
+ENABLE_OPS_ALERTS = "true"
+STAGING_MODE = "true"
+ENABLE_STAGING_LINE = "true"
+ENABLE_STAGING_ADMIN = "true"
+ENABLE_STAGING_REMINDERS = "false"
+DATABASE_BACKEND = "d1"
+ENABLE_EVENT_ORDER_GUARD = "true"
+ENABLE_GROUP_APPROVAL = "true"
+ENABLE_STAGING_GROUP_ACCESS_ADMIN = "true"
+[[d1_databases]]
+binding = "BOSS_DB"
+database_name = "hit2-boss-d1-staging-38984107626"
+database_id = "dfe1d761-05b1-4a72-b7b6-cd8255b9e7f5"
+
+[[d1_databases]]
+binding = "PRODUCTION_BOSS_DB"
+database_name = "hit2-boss-d1-production-38984686581"
+database_id = "db692969-0b74-4dc5-952a-604847e15628"

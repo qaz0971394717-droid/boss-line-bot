@@ -1,0 +1,11 @@
+name = "daily-ranking-bot"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# 08:00 Asia/Taipei = 00:00 UTC
+[[kv_namespaces]]
+binding = "LATEST"
+id = "f1be507e9af341e297556e70880bf972"
+
+[triggers]
+crons = []   # daily push now runs from the home computer (home/run.mjs); cloud IPs are blocked by the site

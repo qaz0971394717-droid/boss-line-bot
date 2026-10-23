@@ -1,0 +1,41 @@
+name: Verify expanded test LINE operational notifications
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['.github/workflows/verify-expanded-ops-notification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-expanded-ops-notification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 -m pip install boto3
+      - name: Load existing private notification key
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: python3 cloudflare-migration/scripts/ops-alert-key.py
+      - name: Wait for staging release and verify both service targets
+        run: |
+          node --input-type=module <<'JS'
+          import {notifyOps} from './cloudflare-migration/scripts/notify-ops.mjs';
+          for(const target of ['memo','parts']){
+            let ok=false;
+            for(let attempt=0;attempt<12;attempt++){
+              try{ok=await notifyOps({target,kind:'alert',message:'【串接測試】'+(target==='memo'?'備忘錄':'零件查詢')+'備份異常通知已接通；這是測試訊息，並非系統故障。',incident:'expanded-notifications-v1'});if(ok)break;}catch(error){if(attempt===11)throw error;}
+              await new Promise(resolve=>setTimeout(resolve,10000));
+            }
+            if(!ok)throw Error('Notification binding missing');
+            console.log('PASS: '+target+' operational notification accepted by bound test LINE bot.');
+          }
+          JS

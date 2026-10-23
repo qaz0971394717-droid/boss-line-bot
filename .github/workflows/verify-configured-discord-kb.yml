@@ -1,0 +1,32 @@
+name: Verify configured Discord KB endpoint
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['.github/workflows/verify-configured-discord-kb.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify deployed configuration and unsigned request rejection
+        run: |
+          node --input-type=module <<'JS'
+          const base='https://hit2-boss-production.qaz0971394717.workers.dev';
+          let health;
+          for(let attempt=0;attempt<12;attempt++){
+            const r=await fetch(base+'/',{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error('Health request failed');health=await r.json();
+            if(health.discord_kb_enabled===true)break;
+            await new Promise(resolve=>setTimeout(resolve,5000));
+          }
+          console.log(JSON.stringify({discord_kb_enabled:health.discord_kb_enabled,discord_reminders_enabled:health.discord_reminders_enabled,line_enabled:health.line_enabled,line_reminders_enabled:health.line_reminders_enabled}));
+          if(health.discord_kb_enabled!==true)throw Error('Discord KB configuration not active');
+          const response=await fetch(base+'/discord/interactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:1}),signal:AbortSignal.timeout(10000)});
+          if(response.status!==401)throw Error('Unsigned Discord request must be rejected');
+          console.log('PASS: Discord KB ready and unsigned requests rejected; Discord must complete its own signed PING when the endpoint is saved.');
+          JS

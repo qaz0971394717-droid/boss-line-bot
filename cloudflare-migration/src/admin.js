@@ -22,11 +22,30 @@ async function safeEqual(a,b){
  for(let i=0;i<aa.length;i++)diff|=aa[i]^bb[i];
  return diff===0;
 }
-export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
+export async function processAdminCommand(input,chatId,env,sql,now=new Date(),context={}){
  if(env.STAGING_MODE!=="true"||env.ENABLE_STAGING_ADMIN!=="true")return isAdminCommand(input)?response("❌ 測試版管理功能尚未啟用。"):null;
  // A single DELETE ... RETURNING atomically consumes a pending challenge.
  // Each chat has at most one active challenge.
- const pending=await sql`DELETE FROM staging_admin_challenges WHERE chat_id=${chatId} RETURNING command,expires_at`;
+ let pending;
+ if(env.ENABLE_ADMIN_ACTOR_GUARD==='true'){
+  if(!context.userId)return isAdminCommand(input)?response('❌ 無法確認操作身分，請稍後再試。'):null;
+  const rows=await sql`SELECT command,expires_at FROM staging_admin_challenges WHERE chat_id=${chatId}`;
+  if(rows.length){
+   const row=rows[0];let owner;try{owner=JSON.parse(row.command);}catch{}
+   const expired=new Date(row.expires_at).getTime()<=now.getTime();
+   if(!owner?.userId||expired){
+    await sql`DELETE FROM staging_admin_challenges WHERE chat_id=${chatId} AND command=${row.command}`;
+    if(!isAdminCommand(input))return response('⏰ 管理驗證已逾時。請重新輸入管理指令。');
+   }else if(owner.userId!==context.userId){
+    return isAdminCommand(input)?response('🔒 目前有人正在管理驗證，請稍後再試。'):null;
+   }else{
+    pending=await sql`DELETE FROM staging_admin_challenges WHERE chat_id=${chatId} AND command=${row.command} RETURNING command,expires_at`;
+    if(!pending.length)return response('此次驗證已處理，請重新輸入管理指令。');
+    pending[0].command=owner.command;
+   }
+  }
+  pending??=[];
+ }else pending=await sql`DELETE FROM staging_admin_challenges WHERE chat_id=${chatId} RETURNING command,expires_at`;
  if(pending.length){
   if(new Date(pending[0].expires_at).getTime()<=now.getTime())return response("⏰ 管理驗證已逾時。請重新輸入管理指令。");
   if(!env.ADMIN_PASSWORD||!await safeEqual(input,env.ADMIN_PASSWORD))return response("❌ 管理密碼錯誤。此次操作已取消。");
@@ -37,8 +56,11 @@ export async function processAdminCommand(input,chatId,env,sql,now=new Date()){
  if(!isAdminCommand(input))return null;
  if(!parseAdminCommand(input))return response("❌ 管理指令格式錯誤：請檢查王名及分鐘數。");
  if(!env.ADMIN_PASSWORD)return response("❌ 測試環境尚未設定管理密碼，管理指令已停用。");
- await sql`INSERT INTO staging_admin_challenges(chat_id,command,expires_at)
- VALUES(${chatId},${input},${new Date(now.getTime()+60000).toISOString()})
+ if(env.ENABLE_ADMIN_ACTOR_GUARD==='true'){
+  const inserted=await sql`INSERT INTO staging_admin_challenges(chat_id,command,expires_at) VALUES(${chatId},${JSON.stringify({command:input,userId:context.userId})},${new Date(now.getTime()+60000).toISOString()}) ON CONFLICT(chat_id) DO NOTHING RETURNING chat_id`;
+  if(!inserted.length)return response('🔒 目前有人正在管理驗證，請稍後再試。');
+ }else await sql`INSERT INTO staging_admin_challenges(chat_id,command,expires_at)
+ VALUES(${chatId},${env.ENABLE_ADMIN_ACTOR_GUARD==='true'?JSON.stringify({command:input,userId:context.userId}):input},${new Date(now.getTime()+60000).toISOString()})
  ON CONFLICT(chat_id) DO UPDATE SET command=EXCLUDED.command,expires_at=EXCLUDED.expires_at`;
  return response("🔒 此操作需要管理權限。請在 60 秒內輸入管理密碼。");
 }

@@ -1,0 +1,73 @@
+name: Deploy private personal memo bot
+on:
+  push:
+    branches: [codex/line-boss-handoff]
+    paths: ['memo-bot/**', '.github/workflows/deploy-memo-bot.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hongzhe-personal-memo-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: memo-bot
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MEMO_LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.MEMO_LINE_CHANNEL_ACCESS_TOKEN }}
+      MEMO_LINE_CHANNEL_SECRET: ${{ secrets.MEMO_LINE_CHANNEL_SECRET }}
+      MEMO_OWNER_LINE_USER_ID: ${{ secrets.MEMO_OWNER_LINE_USER_ID }}
+      MEMO_GOOGLE_CLIENT_ID: ${{ secrets.MEMO_GOOGLE_CLIENT_ID }}
+      MEMO_GOOGLE_CLIENT_SECRET: ${{ secrets.MEMO_GOOGLE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Provision isolated database and check LINE identity
+        run: node scripts/provision.mjs
+      - name: Deploy locked personal Worker
+        run: npx wrangler deploy
+      - name: Set separate memo LINE secrets
+        run: |
+          node --input-type=module -e 'const {execFileSync}=await import("node:child_process");for(const [key,source] of Object.entries({LINE_CHANNEL_SECRET:"MEMO_LINE_CHANNEL_SECRET",LINE_CHANNEL_ACCESS_TOKEN:"MEMO_LINE_CHANNEL_ACCESS_TOKEN",OWNER_LINE_USER_ID:"MEMO_OWNER_LINE_USER_ID"})){execFileSync("./node_modules/.bin/wrangler",["secret","put",key],{input:process.env[source]||"LOCKED",stdio:["pipe","pipe","pipe"]});}console.log("Memo secrets configured without disclosure.");'
+      - name: Configure optional Google authorization
+        run: node scripts/configure-google.mjs
+      - name: Connect and verify new LINE webhook
+        run: node scripts/connect.mjs
+      - name: Verify public OAuth information pages
+        run: |
+          node --input-type=module <<'JS'
+          const base='https://hongzhe-personal-memo.qaz0971394717.workers.dev';
+          for(const path of ['/about','/privacy','/terms']){
+            let ok=false;
+            for(let i=0;i<12;i++){
+              const r=await fetch(base+path,{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});
+              if(r.ok&&r.headers.get('Content-Type')?.includes('text/html')&&(await r.text()).includes('href="/privacy"')){ok=true;break;}
+              await new Promise(resolve=>setTimeout(resolve,5000));
+            }
+            if(!ok)throw Error('Public OAuth page verification failed');
+            console.log('PASS: public OAuth page '+path);
+          }
+          JS
+      - name: Verify LINE-only automatic cleanup configuration
+        run: |
+          node --input-type=module <<'JS'
+          let ready=false;
+          for(let i=0;i<12;i++){
+            const r=await fetch('https://hongzhe-personal-memo.qaz0971394717.workers.dev/',{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});
+            if(!r.ok)throw Error('Memo health request failed');
+            const h=await r.json();
+            if(h.auto_cleanup_enabled===true&&h.auto_cleanup_after_hours===24&&h.auto_cleanup_google===false&&h.owner_configured===true){ready=true;break;}
+            await new Promise(resolve=>setTimeout(resolve,5000));
+          }
+          if(!ready)throw Error('Automatic cleanup configuration not ready');
+          console.log('PASS: 24-hour LINE-only automatic cleanup enabled; Google history preserved.');
+          JS

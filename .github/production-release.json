@@ -1,0 +1,5 @@
+{
+  "sha": "1838b8141d07dd2215794545334c8443ad949734",
+  "acceptance": "User approved the redesigned KB card on 2026-10-21 Asia/Taipei after testing on staging. Release contains only the KB card change (flex.js) on top of the previous production release; no other staging changes. Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 100
+}
