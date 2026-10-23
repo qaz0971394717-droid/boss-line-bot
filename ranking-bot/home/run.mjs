@@ -12,7 +12,8 @@ const env = { ...process.env };
 try {
   for (const line of readFileSync(join(here, ".env"), "utf8").split(/\r?\n/)) {
     const m = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m && !line.trim().startsWith("#")) env[m[1]] ??= m[2].replace(/^["']|["']$/g, "");
+    // RANKING_SOURCE_URL written by older setup.bat versions would hide the built-in page list
+    if (m && !line.trim().startsWith("#") && m[1] !== "RANKING_SOURCE_URL") env[m[1]] ??= m[2].replace(/^["']|["']$/g, "");
   }
 } catch {
   console.error("找不到 home/.env，請照說明建立。");

@@ -13,7 +13,6 @@ echo.
 echo Paste your LINE Channel access token (right-click to paste), then press Enter:
 set /p TOKEN=
 >home\.env echo LINE_CHANNEL_ACCESS_TOKEN=%TOKEN%
->>home\.env echo RANKING_SOURCE_URL=https://jable.tv/hot/
 :haveenv
 
 echo.

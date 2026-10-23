@@ -149,7 +149,7 @@ export async function fetchRanking(env, fetcher = fetch, limit = 10) {
         failures.push(`${new URL(url).host}：頁面讀取成功但找不到影片清單（網站版面可能改了）${pageHint(body)}`);
         break;
       } catch (error) {
-        failures.push(`${new URL(url).host}：連線失敗（${error?.name === "Error" && error.message ? error.message : error?.name || "error"}）`);
+        failures.push(`${new URL(url).host}：連線失敗（${(error?.name === "Error" || /^page\./.test(error?.message || "")) && error.message ? String(error.message).split("\n")[0].slice(0, 100) : error?.name || "error"}）`);
         if (attempt === 2) break;
         await new Promise((r) => setTimeout(r, 1500));
       }
