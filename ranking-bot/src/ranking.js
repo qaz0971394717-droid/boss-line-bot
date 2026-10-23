@@ -2,7 +2,8 @@
 // The page layout is not under our control, so extraction is deliberately generic and every
 // failure is reported with a reason instead of being hidden.
 
-export const DEFAULT_URLS = ["https://jable.tv/hot/"];
+// Tried in this order; later pages only fill up when the earlier ones have too few new videos.
+export const DEFAULT_URLS = ["https://jable.tv/hot/", "https://missav.ws/dm301/today-hot"];
 
 const CODE_PATTERNS = [
   /^(fc2-ppv-\d{5,9})(?:-.*)?$/i,
@@ -165,7 +166,8 @@ export function formatRanking(result, { label = "今日熱門", now = new Date()
   const lines = result.items.slice(0, limit).map((item, i) => {
     // code on its own line and a short title under it, so phone screens do not run entries together
     const title = item.title.length > 40 ? item.title.slice(0, 39) + "…" : item.title;
-    const actress = actressFromTitle(item.title);
+    // the "name at the end of the title" habit is specific to Jable titles
+    const actress = !item.url || /^https?:\/\/([^/]*\.)?jable\.tv\//.test(item.url) ? actressFromTitle(item.title) : "";
     return `${i + 1}. ${item.code}${title ? "\n" + title : ""}${actress ? "\n👩 " + actress : ""}${item.url ? "\n" + item.url : ""}`;
   });
   const note = skipped

@@ -183,8 +183,10 @@ test("the actress is the trailing name of a real Jable title, and only when it l
   assert.equal(actressFromTitle("只有一段文字描述，結尾是句子。"), "");
   assert.equal(actressFromTitle("很長的標題 是不是這樣的一句非常長的結尾文字"), "");
   assert.equal(actressFromTitle(""), "");
-  const text = formatRanking({ ok: true, items: [{ code: "AAA-111", title: "標題 某某某", url: "https://x.test/a" }] }, { now: NOW });
-  assert.match(text, /1\. AAA-111\n標題 某某某\n👩 某某某\nhttps:\/\/x\.test\/a/);
+  const text = formatRanking({ ok: true, items: [{ code: "AAA-111", title: "標題 某某某", url: "https://jable.tv/videos/aaa-111/" }] }, { now: NOW });
+  assert.match(text, /1\. AAA-111\n標題 某某某\n👩 某某某\nhttps:\/\/jable\.tv\/videos\/aaa-111\//);
+  const other = formatRanking({ ok: true, items: [{ code: "AAA-111", title: "標題 某某某", url: "https://missav.ws/dm301/aaa-111" }] }, { now: NOW });
+  assert.doesNotMatch(other, /👩/, "no guessed actress for other sites");
 });
 
 test("long titles are shortened and a partial result is flagged", () => {
