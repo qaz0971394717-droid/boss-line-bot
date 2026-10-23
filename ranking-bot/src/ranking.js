@@ -3,11 +3,15 @@
 // failure is reported with a reason instead of being hidden.
 
 // Tried in this order; later pages only fill up when the earlier ones have too few new videos.
-// "#今日熱門" = open the page, then click the tab with that name (the site switches tabs without
-// changing the address, and /hot/ itself opens on the weekly tab).
+// Jable loads each tab's list with an async block request (the tab button carries
+// data-block-id / sort_by); asking for it directly returns just that list. Pages are tried in
+// order and later ones only fill up when the earlier ones have too few new videos.
+const JABLE_LIST = "https://jable.tv/hot/?mode=async&function=get_block&block_id=list_videos_common_videos_list";
 export const DEFAULT_URLS = [
-  "https://jable.tv/hot/#今日熱門",
-  "https://jable.tv/hot/#本週熱門",
+  `${JABLE_LIST}&sort_by=video_viewed_today&from=1`,
+  `${JABLE_LIST}&sort_by=video_viewed_today&from=2`,
+  `${JABLE_LIST}&sort_by=video_viewed_week&from=1`,
+  `${JABLE_LIST}&sort_by=video_viewed_week&from=2`,
   "https://missav.ws/dm301/today-hot",
 ];
 

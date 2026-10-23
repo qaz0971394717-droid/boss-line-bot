@@ -58,26 +58,22 @@ export async function pushText(env, fetcher, to, text) {
 // skipping those, up to ten new videos can still be listed.
 export async function buildMessage(env, fetcher, now = new Date(), { exclude = new Set(), limit = 10 } = {}) {
   let result, skipped = 0;
-  if (!exclude.size) {
-    result = await fetchRanking(env, fetcher, limit);
-  } else {
-    // Walk the configured pages in order (e.g. today, then this week) until ten new videos are found.
-    const configured = String(env.RANKING_SOURCE_URL || "").split(",").map((u) => u.trim()).filter(Boolean);
-    const merged = new Map(), reasons = [];
-    let usedUrl;
-    for (const url of configured.length ? configured : DEFAULT_URLS) {
-      const page = await fetchRanking({ ...env, RANKING_SOURCE_URL: url }, fetcher, 60);
-      if (!page.ok) { reasons.push(page.reason); continue; }
-      usedUrl ??= page.url;
-      for (const item of page.items) if (!merged.has(item.code)) merged.set(item.code, item);
-      if ([...merged.values()].filter((item) => !exclude.has(item.code)).length >= limit) break;
-    }
-    if (!merged.size) result = { ok: false, reason: reasons.join("\n") || "沒有可用的來源網址" };
-    else {
-      const all = [...merged.values()], fresh = all.filter((item) => !exclude.has(item.code));
-      skipped = all.length - fresh.length;
-      result = { ok: true, url: usedUrl, items: fresh.slice(0, limit) };
-    }
+  // Walk the configured pages in order (today, then this week, ...) until `limit` new videos are found.
+  const configured = String(env.RANKING_SOURCE_URL || "").split(",").map((u) => u.trim()).filter(Boolean);
+  const merged = new Map(), reasons = [];
+  let usedUrl;
+  for (const url of configured.length ? configured : DEFAULT_URLS) {
+    const page = await fetchRanking({ ...env, RANKING_SOURCE_URL: url }, fetcher, 60);
+    if (!page.ok) { reasons.push(page.reason); continue; }
+    usedUrl ??= page.url;
+    for (const item of page.items) if (!merged.has(item.code)) merged.set(item.code, item);
+    if ([...merged.values()].filter((item) => !exclude.has(item.code)).length >= limit) break;
+  }
+  if (!merged.size) result = { ok: false, reason: reasons.join("\n") || "沒有可用的來源網址" };
+  else {
+    const all = [...merged.values()], fresh = all.filter((item) => !exclude.has(item.code));
+    skipped = all.length - fresh.length;
+    result = { ok: true, url: usedUrl, items: fresh.slice(0, limit) };
   }
   const label = env.RANKING_LABEL || "今日熱門";
   const text = result.ok && !result.items.length && skipped

@@ -22,7 +22,7 @@ try {
 
 // The site refuses plain HTTP clients even from a home connection, so the ranking page is
 // opened in a real Chrome (installed on this computer) and LINE calls use normal fetch.
-const VERSION = "v16-wait-list";
+const VERSION = "v17-ajax-lists";
 const debug = (...a) => env.DEBUG === "1" && console.log("[診斷]", ...a);
 const firstSlugs = (html) => [...new Set([...html.matchAll(/\/videos\/([a-z0-9-]+)\//gi)].map((m) => m[1]))].slice(0, 4).join(", ");
 let browser;
@@ -60,6 +60,7 @@ async function browserFetch(url, init) {
       debug("點擊後出現的相關請求：", requests.slice(0, 4).join(" | ") || "（無）");
     }
     const body = await page.content();
+    debug(url.replace(/^.*sort_by=/, "sort_by=").slice(0, 60), "狀態", status, "前幾部：", firstSlugs(body));
     return { status, ok: status < 400, url: page.url(), text: async () => body };
   } finally {
     await page.close();
