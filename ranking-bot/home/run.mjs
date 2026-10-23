@@ -22,7 +22,7 @@ try {
 
 // The site refuses plain HTTP clients even from a home connection, so the ranking page is
 // opened in a real Chrome (installed on this computer) and LINE calls use normal fetch.
-const VERSION = "v14-tabs";
+const VERSION = "v16-wait-list";
 const debug = (...a) => env.DEBUG === "1" && console.log("[診斷]", ...a);
 const firstSlugs = (html) => [...new Set([...html.matchAll(/\/videos\/([a-z0-9-]+)\//gi)].map((m) => m[1]))].slice(0, 4).join(", ");
 let browser;
@@ -43,15 +43,21 @@ async function browserFetch(url, init) {
     for (let i = 0; i < 10 && /Just a moment|請稍候|Attention Required/i.test(await page.title()); i++) await page.waitForTimeout(2000);
     const status = /Just a moment|Attention Required/i.test(await page.title()) ? 403 : response?.status() ?? 0;
     if (tab && status < 400) {
-      const link = page.getByText(tab, { exact: true }).first();
+      // pick the visible tab (a hidden mobile-menu copy may have the same text)
+      const link = page.locator(`text="${tab}" >> visible=true`).first();
       if (!(await link.count())) throw new Error(`找不到分頁「${tab}」`);
-      const before = await page.content();
-      debug(`頁面「${tab}」點之前的前幾部：`, firstSlugs(before));
+      const requests = [];
+      page.on("request", (r) => /sort_by|get_block|mode=async|video_viewed/.test(r.url()) && requests.push(r.url()));
+      const before = firstSlugs(await page.content());
+      debug(`頁面「${tab}」點之前的前幾部：`, before);
+      debug("分頁元素：", (await link.evaluate((el) => el.outerHTML)).slice(0, 200));
       await link.click({ timeout: 10000 });
-      let changed = false;
-      for (let i = 0; i < 10 && !changed; i++) { await page.waitForTimeout(1000); changed = (await page.content()) !== before; }
+      // the list loads after the click; wait until it really differs (or give up after ~20s)
+      let after = before;
+      for (let i = 0; i < 20 && after === before; i++) { await page.waitForTimeout(1000); after = firstSlugs(await page.content()); }
       await page.waitForTimeout(1500);
-      debug(`點了「${tab}」，頁面${changed ? "有" : "沒有"}變化；點之後的前幾部：`, firstSlugs(await page.content()));
+      debug(`點了「${tab}」，清單${after === before ? "沒有" : "有"}變化；點之後的前幾部：`, firstSlugs(await page.content()));
+      debug("點擊後出現的相關請求：", requests.slice(0, 4).join(" | ") || "（無）");
     }
     const body = await page.content();
     return { status, ok: status < 400, url: page.url(), text: async () => body };
