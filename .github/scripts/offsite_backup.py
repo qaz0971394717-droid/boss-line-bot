@@ -94,7 +94,11 @@ STATIC = "static"
 
 
 def wr(*a):
-    return subprocess.run(["npx", "wrangler", *a], capture_output=True)
+    r = subprocess.run(["npx", "wrangler", *a], capture_output=True)
+    if r.returncode != 0:  # wrangler errors name the missing permission, never a secret
+        print("wrangler", a[0], a[1], "->", (r.stderr or b"").decode(errors="replace")[:300].replace("
+", " "))
+    return r
 
 
 os.makedirs(f"{OUT}/ranking-bot", exist_ok=True)
