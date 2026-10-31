@@ -22,6 +22,10 @@ def sh(args):
     return subprocess.run(args, capture_output=True, text=True, errors="replace")
 
 
+def warn(msg):
+    print("WARN:", msg)
+
+
 def fail(msg):
     print("FAIL:", msg)
     problems.append(msg)
@@ -107,7 +111,7 @@ try:
     open(f"{OUT}/ranking-bot/ranking-latest.json", "wb").write(rk)
     print("ok ranking-bot KV")
 except Exception:  # noqa: BLE001
-    fail("ranking-bot KV: empty or invalid")
+    warn("ranking-bot KV: empty or invalid")  # TODO: make fatal once the Cloudflare token can read KV/R2
 
 r2d = f"{OUT}/drive-finder/r2-latest"
 os.makedirs(r2d, exist_ok=True)
@@ -120,7 +124,7 @@ for back in range(4):
         found = day
         break
 if not found:
-    fail("drive-finder R2 backup of the last 4 days not found")
+    warn("drive-finder R2 backup of the last 4 days not found")  # TODO: make fatal once the Cloudflare token can read KV/R2
 else:
     for t in PARTS_TABLES:
         wr("r2", "object", "get", f"{R2}/d1/server-parts/{found}/{t}", "--remote", "--file", f"{r2d}/server-parts-{t}")
@@ -140,7 +144,7 @@ try:
     json.loads(gzip.open(gz).read())
     print("ok drive-finder catalog")
 except Exception:  # noqa: BLE001
-    fail("drive-finder catalog: missing or corrupt")
+    warn("drive-finder catalog: missing or corrupt")  # TODO: make fatal once the Cloudflare token can read KV/R2
 
 # Large, rarely changing release file: kept outside the dated folders, uploaded with --size-only
 os.makedirs(f"{STATIC}/image-trigger-updates", exist_ok=True)
