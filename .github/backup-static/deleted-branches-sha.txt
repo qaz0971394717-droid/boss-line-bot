@@ -1,0 +1,6 @@
+cloudflare-migration f75d1ff431f5ef2ad78222fc303084c7d7f71e99
+codex/d1-migration 6ad82316008d262ff01b4200357596faf14f8d86
+codex/d1-space-management 95409569525fe617128fa1858d89caab7098c406
+codex/line-usability 48ea008a6a0eed34b3495a0c56e20a8a7a131d3d
+claude/kb-card-redesign 83f36fb932bd9872621a429437c9976a780947d3
+claude/ranking-bot 50f0fee8f7a6b316d6657ae1548f6acfc981eb69

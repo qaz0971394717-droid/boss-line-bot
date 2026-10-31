@@ -2,7 +2,7 @@
 
 Never prints secrets. Exit code 1 if anything failed (so the workflow can alert).
 """
-import datetime, json, os, re, sqlite3, subprocess, sys
+import datetime, json, os, re, shutil, sqlite3, subprocess, sys
 
 OUT = "out"
 D1 = {
@@ -86,6 +86,69 @@ for r in PUBLIC_REPOS + PRIVATE_REPOS:
         fail(f"{r}: bundle missing or invalid")  # never print git output: it could echo the token header
     else:
         print(f"ok {r}.bundle")
+
+# ---- extras that are not in D1/git: KV, R2, release asset ----
+KV_RATE, KV_RANK, R2 = "f5264b329f964823a299f71c734d56f8", "f1be507e9af341e297556e70880bf972", "drive-finder-backup"
+PARTS_TABLES = ["schema.sql", "part_records.json", "machine_models.json", "write_version.json", "bot_users.json", "audit_log.json"]
+STATIC = "static"
+
+
+def wr(*a):
+    return subprocess.run(["npx", "wrangler", *a], capture_output=True)
+
+
+os.makedirs(f"{OUT}/ranking-bot", exist_ok=True)
+rk = wr("kv", "key", "get", "latest", "--namespace-id", KV_RANK, "--remote").stdout
+try:
+    json.loads(rk)
+    open(f"{OUT}/ranking-bot/ranking-latest.json", "wb").write(rk)
+    print("ok ranking-bot KV")
+except Exception:  # noqa: BLE001
+    fail("ranking-bot KV: empty or invalid")
+
+r2d = f"{OUT}/drive-finder/r2-latest"
+os.makedirs(r2d, exist_ok=True)
+found = None
+for back in range(4):
+    day = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=back)).date().isoformat()
+    f = f"{r2d}/server-parts-part_records.json"
+    wr("r2", "object", "get", f"{R2}/d1/server-parts/{day}/part_records.json", "--remote", "--file", f)
+    if os.path.exists(f) and os.path.getsize(f) > 0:
+        found = day
+        break
+if not found:
+    fail("drive-finder R2 backup of the last 4 days not found")
+else:
+    for t in PARTS_TABLES:
+        wr("r2", "object", "get", f"{R2}/d1/server-parts/{found}/{t}", "--remote", "--file", f"{r2d}/server-parts-{t}")
+    wr("r2", "object", "get", f"{R2}/d1/drive-finder-meta/{found}/kv.json", "--remote", "--file", f"{r2d}/drive-finder-meta-kv.json")
+    open(f"{r2d}/BACKUP_DAY.txt", "w").write(found)
+    for t in PARTS_TABLES[1:]:
+        try:
+            json.load(open(f"{r2d}/server-parts-{t}", encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            fail(f"R2 {t}: missing or corrupt")
+    print(f"ok drive-finder R2 backup day {found}")
+
+gz = f"{r2d}/catalog.json.gz"
+open(gz, "wb").write(wr("kv", "key", "get", "catalog:gz", "--namespace-id", KV_RATE, "--remote").stdout)
+try:
+    import gzip
+    json.loads(gzip.open(gz).read())
+    print("ok drive-finder catalog")
+except Exception:  # noqa: BLE001
+    fail("drive-finder catalog: missing or corrupt")
+
+# Large, rarely changing release file: kept outside the dated folders, uploaded with --size-only
+os.makedirs(f"{STATIC}/image-trigger-updates", exist_ok=True)
+sh(["gh", "release", "download", "v1.0.0", "-R", f"{OWNER}/image-trigger-updates", "-D", f"{STATIC}/image-trigger-updates", "--clobber"])
+exe = f"{STATIC}/image-trigger-updates/default.exe"
+if os.path.exists(exe) and os.path.getsize(exe) > 0:
+    print("ok image-trigger-updates release file")
+else:
+    fail("image-trigger-updates release file: download failed")
+if os.path.exists(".github/backup-static/deleted-branches-sha.txt"):
+    shutil.copy(".github/backup-static/deleted-branches-sha.txt", f"{STATIC}/deleted-branches-sha.txt")
 
 open(f"{OUT}/MANIFEST.json", "w").write(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "problems": problems}, indent=1))
 sys.exit(1 if problems else 0)

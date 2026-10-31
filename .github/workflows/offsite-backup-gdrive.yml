@@ -37,6 +37,7 @@ jobs:
         if: ${{ !inputs.test_alert }}
         env:
           GH_BACKUP_TOKEN: ${{ secrets.GH_BACKUP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/offsite_backup.py
       - name: Upload to Google Drive
         if: ${{ !inputs.test_alert }}
@@ -51,6 +52,10 @@ jobs:
           rclone copy out "gdrive:cloudflare-backup/$DAY" --config "$RUNNER_TEMP/rclone.conf" --stats-one-line -q
           rclone check out "gdrive:cloudflare-backup/$DAY" --config "$RUNNER_TEMP/rclone.conf" --download --one-way -q
           echo "uploaded and re-downloaded for comparison: $DAY"
+          # large, rarely changing files: upload only when the size changed
+          rclone copy static "gdrive:cloudflare-backup-static" --size-only --config "$RUNNER_TEMP/rclone.conf" --stats-one-line -q
+          rclone check static "gdrive:cloudflare-backup-static" --size-only --one-way --config "$RUNNER_TEMP/rclone.conf" -q
+          echo "static files ok"
           # keep 30 days of offsite copies
           rclone delete gdrive:cloudflare-backup --min-age 30d --rmdirs --config "$RUNNER_TEMP/rclone.conf" -q || true
           rm -f "$RUNNER_TEMP/rclone.conf"
