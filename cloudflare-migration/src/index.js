@@ -47,16 +47,26 @@ export function formatDiscordKb(rows) {
   }
   const lines = ["👑 **HIT2 BOSS 重生時間表**", "━━━━━━━━━━━━━━━━━━", ""];
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
+  // Discord caps content at 2000 chars. Stop on a whole row and always close the
+  // code fence, instead of slicing mid-block and breaking the formatting.
+  const LIMIT = 1850, size = () => lines.join("\n").length;
+  let truncated = false;
   for (const [date, items] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    if (size() + 120 > LIMIT) { truncated = true; break; }
     const first = new Date(items[0].respawn_time);
     const wd = weekdays[({Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6})[new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "Asia/Taipei" }).format(first)]];
     lines.push(`📅 **${date.slice(5).replace("-", "/")}（週${wd}）**`, "```", "時間       BOSS", "────────  ──────────");
-    for (const row of items) lines.push(`${fmtTime.format(new Date(row.respawn_time))}   ${row.boss_name}`);
+    for (const row of items) {
+      const line = `${fmtTime.format(new Date(row.respawn_time))}   ${row.boss_name}`;
+      if (size() + line.length + 1 > LIMIT) { truncated = true; break; }
+      lines.push(line);
+    }
     lines.push("```", "");
+    if (truncated) break;
   }
+  if (truncated) lines.push("…資料較多，已省略部分項目。", "");
   lines.push("🕒 時區：Asia/Taipei");
-  const result = lines.join("\n");
-  return result.length > 2000 ? result.slice(0, 1950) + "\n\n…資料較多，已省略部分項目。" : result;
+  return lines.join("\n");
 }
 
 export function createWorker({ commandHandler = handleLineCommand, fetcher = fetch, eventStoreFactory = createEventStore } = {}) {

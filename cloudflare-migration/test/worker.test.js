@@ -188,6 +188,15 @@ test('reject unsigned Discord webhook when explicitly enabled', async () => {
 
 test('empty KB', () => assert.match(formatDiscordKb([]), /沒有 BOSS 紀錄/));
 
+test('long KB stays under the Discord limit with balanced code fences', () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({ boss_name: `王${i}H`, respawn_time: new Date(Date.UTC(2026, 9, 17 + Math.floor(i / 20), i % 20, i % 60)).toISOString() }));
+  const out = formatDiscordKb(rows);
+  assert.ok(out.length <= 2000);
+  assert.equal((out.match(/```/g) || []).length % 2, 0);
+  assert.match(out, /已省略部分項目/);
+  assert.doesNotMatch(formatDiscordKb(rows.slice(0, 3)), /已省略/);
+});
+
 test('Discord webhook requires explicit staging enablement', async () => {
  const r=await worker.fetch(new Request('https://staging.example/discord/interactions',{method:'POST',body:'{}'}),{STAGING_MODE:'true'});
  assert.equal(r.status,503);
