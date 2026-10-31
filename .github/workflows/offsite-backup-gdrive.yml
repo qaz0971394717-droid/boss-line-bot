@@ -29,7 +29,7 @@ jobs:
           sudo apt-get install -y rclone >/dev/null
       - name: Export, verify and bundle
         run: python3 .github/scripts/offsite_backup.py
-      - name: Encrypt and upload to Google Drive
+      - name: Upload to Google Drive
         env:
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
         run: |
@@ -38,11 +38,11 @@ jobs:
           umask 077
           printf '%s' "$RCLONE_CONF" > "$RUNNER_TEMP/rclone.conf"
           DAY=$(date -u +%F)
-          rclone copy out "gdrive-crypt:$DAY" --config "$RUNNER_TEMP/rclone.conf" --stats-one-line -q
-          rclone check out "gdrive-crypt:$DAY" --config "$RUNNER_TEMP/rclone.conf" --download --one-way -q
+          rclone copy out "gdrive:cloudflare-backup/$DAY" --config "$RUNNER_TEMP/rclone.conf" --stats-one-line -q
+          rclone check out "gdrive:cloudflare-backup/$DAY" --config "$RUNNER_TEMP/rclone.conf" --download --one-way -q
           echo "uploaded and re-downloaded for comparison: $DAY"
           # keep 30 days of offsite copies
-          rclone delete gdrive-crypt: --min-age 30d --rmdirs --config "$RUNNER_TEMP/rclone.conf" -q || true
+          rclone delete gdrive:cloudflare-backup --min-age 30d --rmdirs --config "$RUNNER_TEMP/rclone.conf" -q || true
           rm -f "$RUNNER_TEMP/rclone.conf"
       - name: Open an issue if the offsite backup failed
         if: failure()
