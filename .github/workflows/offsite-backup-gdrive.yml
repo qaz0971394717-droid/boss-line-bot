@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '20 20 * * *'
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: 'Send a test LINE alert (and skip the backup)'
+        type: boolean
+        default: false
 permissions:
   contents: read
   issues: write
@@ -23,15 +28,18 @@ jobs:
         with:
           node-version: '22'
       - name: Install tools
+        if: ${{ !inputs.test_alert }}
         run: |
           npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/w" wrangler@4
           echo "$RUNNER_TEMP/w/node_modules/.bin" >> "$GITHUB_PATH"
           sudo apt-get install -y rclone >/dev/null
       - name: Export, verify and bundle
+        if: ${{ !inputs.test_alert }}
         env:
           GH_BACKUP_TOKEN: ${{ secrets.GH_BACKUP_TOKEN }}
         run: python3 .github/scripts/offsite_backup.py
       - name: Upload to Google Drive
+        if: ${{ !inputs.test_alert }}
         env:
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
         run: |
@@ -47,10 +55,23 @@ jobs:
           rclone delete gdrive:cloudflare-backup --min-age 30d --rmdirs --config "$RUNNER_TEMP/rclone.conf" -q || true
           rm -f "$RUNNER_TEMP/rclone.conf"
       - name: Open an issue if the offsite backup failed
-        if: failure()
+        if: failure() && !inputs.test_alert
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Offsite Google Drive backup failed $(date -u +%F)" \
             --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Alert on LINE if the backup failed
+        if: failure() || inputs.test_alert
+        env:
+          LINE_TOKEN: ${{ secrets.MEMO_LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.MEMO_OWNER_LINE_USER_ID }}
+          TEST: ${{ inputs.test_alert }}
+        run: |
+          set +x
+          if [ "$TEST" = "true" ]; then MSG="[測試] 異地備份失敗通知功能正常"; else MSG="異地備份失敗 $(date -u +%F)，請查看 $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"; fi
+          BODY=$(python3 -c 'import json,sys; print(json.dumps({"to":sys.argv[1],"messages":[{"type":"text","text":sys.argv[2]}]}))' "$LINE_TO" "$MSG")
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST https://api.line.me/v2/bot/message/push -H "Authorization: Bearer $LINE_TOKEN" -H 'Content-Type: application/json' -d "$BODY")
+          echo "LINE push status: $CODE"
+          [ "$CODE" = "200" ]
