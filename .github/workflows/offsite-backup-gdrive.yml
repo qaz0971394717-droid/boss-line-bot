@@ -1,0 +1,54 @@
+name: Offsite backup to Google Drive
+on:
+  schedule:
+    - cron: '20 20 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: offsite-backup-gdrive
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tools
+        run: |
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/w" wrangler@4
+          echo "$RUNNER_TEMP/w/node_modules/.bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y rclone >/dev/null
+      - name: Export, verify and bundle
+        run: python3 .github/scripts/offsite_backup.py
+      - name: Encrypt and upload to Google Drive
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+        run: |
+          set +x
+          [ -n "$RCLONE_CONF" ] || { echo "RCLONE_CONF secret is missing"; exit 1; }
+          umask 077
+          printf '%s' "$RCLONE_CONF" > "$RUNNER_TEMP/rclone.conf"
+          DAY=$(date -u +%F)
+          rclone copy out "gdrive-crypt:$DAY" --config "$RUNNER_TEMP/rclone.conf" --stats-one-line -q
+          rclone check out "gdrive-crypt:$DAY" --config "$RUNNER_TEMP/rclone.conf" --download --one-way -q
+          echo "uploaded and re-downloaded for comparison: $DAY"
+          # keep 30 days of offsite copies
+          rclone delete gdrive-crypt: --min-age 30d --rmdirs --config "$RUNNER_TEMP/rclone.conf" -q || true
+          rm -f "$RUNNER_TEMP/rclone.conf"
+      - name: Open an issue if the offsite backup failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Offsite Google Drive backup failed $(date -u +%F)" \
+            --body "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
