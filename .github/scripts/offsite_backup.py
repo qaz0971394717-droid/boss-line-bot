@@ -13,6 +13,7 @@ D1 = {
     "drive-finder": [("drive-finder-meta", "drive-finder-meta.sql")],
 }
 PUBLIC_REPOS = ["boss-line-bot", "hit2-boss-reminder", "image-trigger-updates"]
+PRIVATE_REPOS = ["drive-finder", "server-parts-line-bot"]  # need the GH_BACKUP_TOKEN secret
 OWNER = "qaz0971394717-droid"
 problems = []
 
@@ -68,14 +69,21 @@ for proj, items in D1.items():
             fail(f"{fname}: backup has far fewer rows than live {big}")
 
 os.makedirs(f"{OUT}/repos", exist_ok=True)
-for r in PUBLIC_REPOS:
+import base64
+token = os.environ.get("GH_BACKUP_TOKEN", "")
+auth = ["-c", "http.extraheader=Authorization: Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()] if token else []
+for r in PUBLIC_REPOS + PRIVATE_REPOS:
+    private = r in PRIVATE_REPOS
+    if private and not token:
+        print(f"skip {r}: GH_BACKUP_TOKEN not set")
+        continue
     d = f"/tmp/{r}.git"
-    sh(["git", "clone", "--mirror", "-q", f"https://github.com/{OWNER}/{r}.git", d])
+    sh(["git", *(auth if private else []), "clone", "--mirror", "-q", f"https://github.com/{OWNER}/{r}.git", d])
     b = f"{OUT}/repos/{r}.bundle"
     sh(["git", "--git-dir", d, "bundle", "create", b, "--all"])
     v = sh(["git", "bundle", "verify", b])
     if v.returncode != 0:
-        fail(f"{r}: bundle invalid")
+        fail(f"{r}: bundle missing or invalid")  # never print git output: it could echo the token header
     else:
         print(f"ok {r}.bundle")
 
