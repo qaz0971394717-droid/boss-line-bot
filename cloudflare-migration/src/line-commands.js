@@ -22,7 +22,9 @@ export function parseKillTime(input, now = new Date()) {
   if(hh>23||mm>59||ss>59) return null;
   const day=new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Taipei",year:"numeric",month:"2-digit",day:"2-digit"}).format(now);
   const parsed=new Date(`${day}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}+08:00`);
-  return Number.isNaN(parsed.getTime())?null:parsed;
+  if(Number.isNaN(parsed.getTime()))return null;
+  // A clock time later than now can only mean yesterday (e.g. 23:50 entered at 00:10).
+  return parsed.getTime()>now.getTime()+60000?new Date(parsed.getTime()-86400000):parsed;
 }
 
 export function parseRespawnTime(day,clock) {
@@ -164,7 +166,7 @@ async function runLineCommand(command, chatId, env, now=new Date(), context={}) 
       VALUES(${chatId},${boss.boss_name.toLowerCase()},${boss.boss_name},${kill.toISOString()},${respawn.toISOString()})
       ON CONFLICT(chat_id,boss_key) DO UPDATE SET boss_name=EXCLUDED.boss_name,kill_time=EXCLUDED.kill_time,respawn_time=EXCLUDED.respawn_time`;
     const reminder=await stagingReminderRequest(env, "/schedule", reminderPayload(chatId, boss.boss_name, respawn));
-    if(parts.length===4)return textMessage(`✅ ${boss.boss_name}｜擊殺 ${taipeiTime(kill)}｜出生 ${taipeiTime(respawn)}`);
+    if(parts.length===4)return textMessage(`✅ ${boss.boss_name}｜擊殺 ${taipeiTime(kill)}｜出生 ${taipeiTime(respawn)}${reminderWarning(env,reminder,"排程")}`);
     return textMessage(`✅ ${boss.boss_name} 擊殺已記錄｜下次出生 ${taipeiTime(respawn)}${reminderWarning(env,reminder,"排程")}`);
   }
   if(input.startsWith("取消 ")){

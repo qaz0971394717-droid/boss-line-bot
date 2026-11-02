@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {GROUP_ACCESS_SCHEMA,groupAccessReply,processGroupAccessCommand} from '../src/group-access.js';
+import {GROUP_ACCESS_SCHEMA,groupAccessReply,processGroupAccessCommand,rememberGroupName} from '../src/group-access.js';
 import {createSql} from '../src/database.js';
 import {shouldProcessCommand} from '../src/command-filter.js';
 
@@ -160,5 +160,80 @@ test('production bot approval never reaches another database',async()=>{
   const ctx={userId:user,sourceType:'user'};
   await processGroupAccessCommand(`授權群組 ${target}`,user,prodEnv,sql,now,ctx);
   assert.match((await processGroupAccessCommand('owner-secret',user,prodEnv,sql,now,ctx)).text,/待審申請/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('group admin card lists approved and pending groups; buttons reuse the password-protected commands',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),ok='C'+'1'.repeat(32),wait='C'+'2'.repeat(32),old='C'+'3'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?)").run(ok,user);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','grandfathered')").run(old);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'pending','2026-10-30T00:00:00Z')").run(wait);
+  const card=await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql);
+  assert.equal(card.type,'flex');
+  const json=JSON.stringify(card);
+  assert.match(json,/已授權群組（2）/);assert.match(json,/等待核准（1）/);
+  assert.match(json,new RegExp(`撤銷群組授權 ${ok}`));assert.match(json,new RegExp(`授權群組 ${wait}`));
+  assert.ok(json.length<20000);
+  // Tapping 撤銷 starts the normal password challenge; nothing changes until it is confirmed.
+  assert.match((await processGroupAccessCommand(`撤銷群組授權 ${ok}`,user,env,sql,now,{userId:user,sourceType:'user'},managementSql)).text,/管理密碼/);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'approved');
+  assert.match((await processGroupAccessCommand('owner-secret',user,env,sql,now,{userId:user,sourceType:'user'},managementSql)).text,/已移除群組/);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'denied');
+  const after=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(after,/已授權群組（1）/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('group admin card is private-chat only, staging-only and handles empty lists',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),group='C'+'4'.repeat(32);
+  assert.match((await processGroupAccessCommand('群組管理',group,env,sql,now,{userId:user,sourceType:'group'},managementSql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('群組管理',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,{userId:user,sourceType:'user'},managementSql),null);
+  assert.equal(await shouldProcessCommand('群組管理',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},{userId:user}),false);
+  assert.equal(await shouldProcessCommand('群組管理',user,env,{userId:user}),true);
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(card,/已授權群組（0）/);assert.match(card,/目前沒有/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('group names are stored once, refreshed weekly, and failures never throw',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const g='C'+'5'.repeat(32),user='U'+'b'.repeat(32);let calls=0,fail=false;
+  const fetcher=async url=>{calls++;assert.match(url,new RegExp(`/bot/group/${g}/summary$`));if(fail)throw new Error('down');return {ok:true,json:async()=>({groupName:'血盟 A 隊'})};};
+  await rememberGroupName(g,'group',env,sql,fetcher,now);assert.equal(calls,0);// unknown group: nothing to update
+  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'approved','2026-10-01T00:00:00Z')").run(g);
+  await rememberGroupName(g,'room',env,sql,fetcher,now);assert.equal(calls,0);// rooms have no summary
+  await rememberGroupName(g,'group',env,sql,fetcher,now);
+  assert.equal(db.prepare('SELECT group_name FROM group_access WHERE chat_id=?').get(g).group_name,'血盟 A 隊');
+  await rememberGroupName(g,'group',env,sql,fetcher,new Date(now.getTime()+3600000));assert.equal(calls,1);// cached
+  fail=true;
+  await rememberGroupName(g,'group',env,sql,fetcher,new Date(now.getTime()+8*86400000));// refresh fails, keeps old name
+  assert.equal(db.prepare('SELECT group_name FROM group_access WHERE chat_id=?').get(g).group_name,'血盟 A 隊');
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by,group_name) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?,?)").run(g,user,'血盟 A 隊');
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'pending','2026-10-30T00:00:00Z')").run('C'+'6'.repeat(32));
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(card,/血盟 A 隊/);assert.match(card,/名稱未知/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('pending requests can be dismissed one by one or all at once without touching approved groups',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),ok='C'+'1'.repeat(32),p1='C'+'2'.repeat(32),p2='C'+'3'.repeat(32);
+  const ins=(id,st)=>productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,'2026-10-30T00:00:00Z')").run(id,st);
+  ins(ok,'approved');ins(p1,'pending');ins(p2,'pending');
+  const ctx={userId:user,sourceType:'user'};
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,ctx,managementSql));
+  assert.match(card,new RegExp(`移除申請 ${p1}`));assert.match(card,/全部移除待核准（2）/);
+  assert.match(JSON.stringify(await processGroupAccessCommand(`移除申請 ${p1}`,user,env,sql,now,ctx,managementSql)),/等待核准（1）/);
+  assert.equal(productionDb.prepare('SELECT count(*) AS n FROM group_access WHERE chat_id=?').get(p1).n,0);
+  // A dismiss command can never remove an approved group.
+  await processGroupAccessCommand(`移除申請 ${ok}`,user,env,sql,now,ctx,managementSql);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'approved');
+  assert.match(JSON.stringify(await processGroupAccessCommand('移除待核准',user,env,sql,now,ctx,managementSql)),/等待核准（0）/);
+  assert.equal(productionDb.prepare('SELECT count(*) AS n FROM group_access').get().n,1);
+  assert.match((await processGroupAccessCommand('移除待核准','C'+'4'.repeat(32),env,sql,now,{userId:user,sourceType:'group'},managementSql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('移除待核准',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,managementSql),null);
+  assert.equal(await shouldProcessCommand(`移除申請 ${p1}`,user,env,{userId:user}),true);
  }finally{db.close();productionDb.close();}
 });
