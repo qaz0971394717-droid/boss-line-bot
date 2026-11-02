@@ -216,3 +216,24 @@ test('group names are stored once, refreshed weekly, and failures never throw',a
   assert.match(card,/血盟 A 隊/);assert.match(card,/名稱未知/);
  }finally{db.close();productionDb.close();}
 });
+
+test('pending requests can be dismissed one by one or all at once without touching approved groups',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),ok='C'+'1'.repeat(32),p1='C'+'2'.repeat(32),p2='C'+'3'.repeat(32);
+  const ins=(id,st)=>productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,'2026-10-30T00:00:00Z')").run(id,st);
+  ins(ok,'approved');ins(p1,'pending');ins(p2,'pending');
+  const ctx={userId:user,sourceType:'user'};
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,ctx,managementSql));
+  assert.match(card,new RegExp(`移除申請 ${p1}`));assert.match(card,/全部移除待核准（2）/);
+  assert.match(JSON.stringify(await processGroupAccessCommand(`移除申請 ${p1}`,user,env,sql,now,ctx,managementSql)),/等待核准（1）/);
+  assert.equal(productionDb.prepare('SELECT count(*) AS n FROM group_access WHERE chat_id=?').get(p1).n,0);
+  // A dismiss command can never remove an approved group.
+  await processGroupAccessCommand(`移除申請 ${ok}`,user,env,sql,now,ctx,managementSql);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'approved');
+  assert.match(JSON.stringify(await processGroupAccessCommand('移除待核准',user,env,sql,now,ctx,managementSql)),/等待核准（0）/);
+  assert.equal(productionDb.prepare('SELECT count(*) AS n FROM group_access').get().n,1);
+  assert.match((await processGroupAccessCommand('移除待核准','C'+'4'.repeat(32),env,sql,now,{userId:user,sourceType:'group'},managementSql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('移除待核准',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,managementSql),null);
+  assert.equal(await shouldProcessCommand(`移除申請 ${p1}`,user,env,{userId:user}),true);
+ }finally{db.close();productionDb.close();}
+});
