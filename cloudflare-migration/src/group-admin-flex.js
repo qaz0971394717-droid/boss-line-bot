@@ -7,7 +7,7 @@ const tail=id=>`…${String(id).slice(-6)}`;
 const text=(value,extra={})=>({type:'text',text:value,wrap:true,size:'sm',color:'#334155',...extra});
 const button=(label,command,color)=>({type:'button',height:'sm',style:'primary',color,flex:0,action:{type:'message',label,text:command}});
 const entry=(row,label,command,color,note)=>({type:'box',layout:'horizontal',alignItems:'center',margin:'md',spacing:'sm',contents:[
- {type:'box',layout:'vertical',flex:1,contents:[text(`群組 ${tail(row.chat_id)}`,{weight:'bold',color:'#0F172A'}),text(note,{size:'xs',color:'#64748B'})]},
+ {type:'box',layout:'vertical',flex:1,contents:[text(row.group_name||'（名稱未知）',{weight:'bold',color:row.group_name?'#0F172A':'#94A3B8'}),text(`${note}・ID ${tail(row.chat_id)}`,{size:'xs',color:'#64748B'})]},
  button(label,command,color)
 ]});
 const section=(title,rows,build)=>[text(`${title}（${rows.length}）`,{weight:'bold',color:'#1E3A8A',margin:'lg'}),

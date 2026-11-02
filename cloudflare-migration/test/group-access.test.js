@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {GROUP_ACCESS_SCHEMA,groupAccessReply,processGroupAccessCommand} from '../src/group-access.js';
+import {GROUP_ACCESS_SCHEMA,groupAccessReply,processGroupAccessCommand,rememberGroupName} from '../src/group-access.js';
 import {createSql} from '../src/database.js';
 import {shouldProcessCommand} from '../src/command-filter.js';
 
@@ -194,5 +194,25 @@ test('group admin card is private-chat only, staging-only and handles empty list
   assert.equal(await shouldProcessCommand('群組管理',user,env,{userId:user}),true);
   const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
   assert.match(card,/已授權群組（0）/);assert.match(card,/目前沒有/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('group names are stored once, refreshed weekly, and failures never throw',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const g='C'+'5'.repeat(32),user='U'+'b'.repeat(32);let calls=0,fail=false;
+  const fetcher=async url=>{calls++;assert.match(url,new RegExp(`/bot/group/${g}/summary$`));if(fail)throw new Error('down');return {ok:true,json:async()=>({groupName:'血盟 A 隊'})};};
+  await rememberGroupName(g,'group',env,sql,fetcher,now);assert.equal(calls,0);// unknown group: nothing to update
+  db.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'approved','2026-10-01T00:00:00Z')").run(g);
+  await rememberGroupName(g,'room',env,sql,fetcher,now);assert.equal(calls,0);// rooms have no summary
+  await rememberGroupName(g,'group',env,sql,fetcher,now);
+  assert.equal(db.prepare('SELECT group_name FROM group_access WHERE chat_id=?').get(g).group_name,'血盟 A 隊');
+  await rememberGroupName(g,'group',env,sql,fetcher,new Date(now.getTime()+3600000));assert.equal(calls,1);// cached
+  fail=true;
+  await rememberGroupName(g,'group',env,sql,fetcher,new Date(now.getTime()+8*86400000));// refresh fails, keeps old name
+  assert.equal(db.prepare('SELECT group_name FROM group_access WHERE chat_id=?').get(g).group_name,'血盟 A 隊');
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by,group_name) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?,?)").run(g,user,'血盟 A 隊');
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'pending','2026-10-30T00:00:00Z')").run('C'+'6'.repeat(32));
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(card,/血盟 A 隊/);assert.match(card,/名稱未知/);
  }finally{db.close();productionDb.close();}
 });

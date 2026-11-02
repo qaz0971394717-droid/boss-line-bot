@@ -14,6 +14,9 @@ async function query(sql){
  return data.result;
 }
 for(const statement of GROUP_ACCESS_SCHEMA)await query(statement);
+// Group names for the admin card (additive; older tables are upgraded in place).
+const columns=(await query("SELECT name FROM pragma_table_info('group_access')"))[0].results.map(row=>row.name);
+for(const [name,type] of [['group_name','TEXT'],['name_checked_at','TEXT']])if(!columns.includes(name))await query(`ALTER TABLE group_access ADD COLUMN ${name} ${type}`);
 // Existing groups already have a settings row or BOSS records. Grandfather them
 // once; later denials/revocations are preserved by INSERT OR IGNORE semantics.
 await query(`INSERT OR IGNORE INTO group_access(chat_id,status,requested_at,approved_at,approved_by)

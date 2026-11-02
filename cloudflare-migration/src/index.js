@@ -8,7 +8,7 @@ import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
 import { fetchWithTimeout } from "./http.js";
 import { createEventStore } from "./events.js";
-import { groupAccessReply } from "./group-access.js";
+import { groupAccessReply, rememberGroupName } from "./group-access.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const bytes = (s) => new TextEncoder().encode(s);
@@ -116,6 +116,7 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           const accessReply=env.ENABLE_GROUP_APPROVAL==='true'&&commandHandler===handleLineCommand
             ? await groupAccessReply(command,chatId,event.source?.type,env,createSql(env),new Date(context.eventTimestamp)) : null;
           const reply = claim.state === "ready" ? claim.reply : (accessReply || await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
+          if(env.ENABLE_GROUP_APPROVAL==='true'&&commandHandler===handleLineCommand)await rememberGroupName(chatId,event.source?.type,env,createSql(env),fetcher,new Date(context.eventTimestamp));
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
           if(!reply){await eventStore.delivered(event.webhookEventId);outcomes.push('ok');continue;}

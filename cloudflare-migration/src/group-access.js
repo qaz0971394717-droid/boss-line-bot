@@ -7,7 +7,9 @@ export const GROUP_ACCESS_SCHEMA = [
     status TEXT NOT NULL CHECK(status IN ('pending','approved','denied')),
     requested_at TEXT NOT NULL,
     approved_at TEXT,
-    approved_by TEXT
+    approved_by TEXT,
+    group_name TEXT,
+    name_checked_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS group_access_challenges (
     user_id TEXT PRIMARY KEY,
@@ -22,6 +24,24 @@ export const GROUP_ACCESS_SCHEMA = [
   )`,
   'CREATE INDEX IF NOT EXISTS group_access_status ON group_access(status,requested_at)'
 ];
+
+const NAME_REFRESH_MS=7*86400000,NAME_RETRY_MS=86400000;
+// Best effort: store the LINE group name so the admin card is readable. Never throws.
+export async function rememberGroupName(chatId,sourceType,env,sql,fetcher,now=new Date()){
+  try{
+    if(sourceType!=='group')return;
+    const rows=await sql`SELECT group_name,name_checked_at FROM group_access WHERE chat_id=${chatId}`;
+    if(!rows.length)return;
+    const age=rows[0].name_checked_at?now.getTime()-new Date(rows[0].name_checked_at).getTime():Infinity;
+    if(age<(rows[0].group_name?NAME_REFRESH_MS:NAME_RETRY_MS))return;
+    let name=null;
+    try{
+      const res=await fetcher(`https://api.line.me/v2/bot/group/${chatId}/summary`,{headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`},signal:AbortSignal.timeout(3000)});
+      if(res.ok)name=String((await res.json())?.groupName||'').slice(0,60)||null;
+    }catch{}
+    await sql`UPDATE group_access SET group_name=${name||rows[0].group_name||null},name_checked_at=${now.toISOString()} WHERE chat_id=${chatId}`;
+  }catch{}
+}
 
 export const isGroupAccessCommand = input => {
   const text=input.trim();
@@ -42,7 +62,9 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
   if(text==='群組管理'){
     if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 使用群組管理。');
     if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
-    const rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;
+    let rows;
+    try{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by,group_name FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
+    catch{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
     return createGroupAdminFlex(rows);
   }
   const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);
