@@ -1,3 +1,4 @@
+import {createGroupAdminFlex} from './group-admin-flex.js';
 const response = text => ({type:'text',text});
 
 export const GROUP_ACCESS_SCHEMA = [
@@ -24,12 +25,12 @@ export const GROUP_ACCESS_SCHEMA = [
 
 export const isGroupAccessCommand = input => {
   const text=input.trim();
-  return text==='申請使用'||text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
+  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={},managementSql=null){
   const text=input.trim();
-  const stagingOnlyCommand=text==='授權群組數'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
+  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   if(text==='授權群組數'){
@@ -37,6 +38,12 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
     const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
     return response(`📊 正式版目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
+  }
+  if(text==='群組管理'){
+    if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 使用群組管理。');
+    if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
+    const rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;
+    return createGroupAdminFlex(rows);
   }
   const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);
   if(revoke){
@@ -124,6 +131,6 @@ export async function groupAccessReply(input,chatId,sourceType,env,sql,now=new D
     await sql`INSERT INTO group_access(chat_id,status,requested_at) VALUES(${chatId},'pending',${now.toISOString()})
       ON CONFLICT(chat_id) DO UPDATE SET status='pending',requested_at=excluded.requested_at WHERE group_access.status='denied'`;
   }
-  if(text!=='申請使用'&&text!=='授權群組數'&&!/^撤銷群組授權(?:\s|$)/i.test(text)&&!/^(?:KB|王|BOSS|測試|TEST|HELP|指令|進階指令|管理指令|指令文字|進階指令文字|管理指令文字|群組ID|GROUPID|HALF(?:\s+(?:ON|OFF))?|清除KB|RESTART|同步提醒|王列表|BOSS列表|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王|授權群組)(?:\s|$)/i.test(text))return null;
+  if(text!=='申請使用'&&text!=='授權群組數'&&text!=='群組管理'&&!/^撤銷群組授權(?:\s|$)/i.test(text)&&!/^(?:KB|王|BOSS|測試|TEST|HELP|指令|進階指令|管理指令|指令文字|進階指令文字|管理指令文字|群組ID|GROUPID|HALF(?:\s+(?:ON|OFF))?|清除KB|RESTART|同步提醒|王列表|BOSS列表|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王|授權群組)(?:\s|$)/i.test(text))return null;
   return response(`🔒 本群尚未授權使用 BOSS Bot。\n請輸入「申請使用」取得群組 ID，再傳給管理者核准。\n群組 ID：${chatId}`);
 }

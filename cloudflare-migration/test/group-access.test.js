@@ -162,3 +162,37 @@ test('production bot approval never reaches another database',async()=>{
   assert.match((await processGroupAccessCommand('owner-secret',user,prodEnv,sql,now,ctx)).text,/待審申請/);
  }finally{db.close();productionDb.close();}
 });
+
+test('group admin card lists approved and pending groups; buttons reuse the password-protected commands',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),ok='C'+'1'.repeat(32),wait='C'+'2'.repeat(32),old='C'+'3'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?)").run(ok,user);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-09-01T00:00:00Z','2026-09-01T00:00:00Z','grandfathered')").run(old);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'pending','2026-10-30T00:00:00Z')").run(wait);
+  const card=await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql);
+  assert.equal(card.type,'flex');
+  const json=JSON.stringify(card);
+  assert.match(json,/已授權群組（2）/);assert.match(json,/等待核准（1）/);
+  assert.match(json,new RegExp(`撤銷群組授權 ${ok}`));assert.match(json,new RegExp(`授權群組 ${wait}`));
+  assert.ok(json.length<20000);
+  // Tapping 撤銷 starts the normal password challenge; nothing changes until it is confirmed.
+  assert.match((await processGroupAccessCommand(`撤銷群組授權 ${ok}`,user,env,sql,now,{userId:user,sourceType:'user'},managementSql)).text,/管理密碼/);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'approved');
+  assert.match((await processGroupAccessCommand('owner-secret',user,env,sql,now,{userId:user,sourceType:'user'},managementSql)).text,/已移除群組/);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(ok).status,'denied');
+  const after=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(after,/已授權群組（1）/);
+ }finally{db.close();productionDb.close();}
+});
+
+test('group admin card is private-chat only, staging-only and handles empty lists',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),group='C'+'4'.repeat(32);
+  assert.match((await processGroupAccessCommand('群組管理',group,env,sql,now,{userId:user,sourceType:'group'},managementSql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('群組管理',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,{userId:user,sourceType:'user'},managementSql),null);
+  assert.equal(await shouldProcessCommand('群組管理',user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},{userId:user}),false);
+  assert.equal(await shouldProcessCommand('群組管理',user,env,{userId:user}),true);
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,{userId:user,sourceType:'user'},managementSql));
+  assert.match(card,/已授權群組（0）/);assert.match(card,/目前沒有/);
+ }finally{db.close();productionDb.close();}
+});
