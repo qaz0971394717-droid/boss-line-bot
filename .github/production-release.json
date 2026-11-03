@@ -1,5 +1,5 @@
 {
-  "sha": "1838b8141d07dd2215794545334c8443ad949734",
-  "acceptance": "User approved the redesigned KB card on 2026-10-21 Asia/Taipei after testing on staging. Release contains only the KB card change (flex.js) on top of the previous production release; no other staging changes. Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 100
+  "sha": "f6c75f0f0e6fc320f91ad1f9c77d896f1a2cddc8",
+  "acceptance": "User approved on 2026-11-04 Asia/Taipei: K confirmation replies show the reporter name, plus the group admin card (staging only) and K time fixes. Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 114
 }
