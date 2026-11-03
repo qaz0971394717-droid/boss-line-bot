@@ -6,6 +6,7 @@ import { expiredEvent } from "./retention-policy.js";
 import { migrationGate } from "./migration.js";
 import { createSql, hasDatabase } from "./database.js";
 import { handleLineCommand, getChatId } from "./line-commands.js";
+import { addKillAuthor } from "./kill-author.js";
 import { fetchWithTimeout } from "./http.js";
 import { createEventStore } from "./events.js";
 import { groupAccessReply, rememberGroupName } from "./group-access.js";
@@ -115,7 +116,8 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           stage = "command";
           const accessReply=env.ENABLE_GROUP_APPROVAL==='true'&&commandHandler===handleLineCommand
             ? await groupAccessReply(command,chatId,event.source?.type,env,createSql(env),new Date(context.eventTimestamp)) : null;
-          const reply = claim.state === "ready" ? claim.reply : (accessReply || await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
+          let reply = claim.state === "ready" ? claim.reply : (accessReply || await bindAlerts(command,chatId,env) || await commandHandler(command, chatId, undoEnvironment(env,command,chatId,context.userId), new Date(context.eventTimestamp), context));
+          if (claim.state !== "ready" && commandHandler === handleLineCommand) reply = await addKillAuthor(reply, command, event.source, env, fetcher);
           if(env.ENABLE_GROUP_APPROVAL==='true'&&commandHandler===handleLineCommand)await rememberGroupName(chatId,event.source?.type,env,createSql(env),fetcher,new Date(context.eventTimestamp));
           stage = "reply-storage";
           if (claim.state === "new") await eventStore.complete(event.webhookEventId, reply);
