@@ -1,5 +1,5 @@
 {
-  "sha": "f6c75f0f0e6fc320f91ad1f9c77d896f1a2cddc8",
-  "acceptance": "User approved on 2026-11-04 Asia/Taipei: K confirmation replies show the reporter name, plus the group admin card (staging only) and K time fixes. Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 114
+  "sha": "a896173432e4cd0799923b573e98bc103ca9d09e",
+  "acceptance": "User approved on 2026-11-08 Asia/Taipei: admin card can pause/resume a group (paused groups are silent on the production bot). Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 115
 }
