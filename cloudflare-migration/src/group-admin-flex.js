@@ -24,7 +24,7 @@ export function createGroupAdminFlex(rows){
    return entry(row,[
     paused?button('恢復',`恢復群組 ${row.chat_id}`,'#16A34A'):button('暫停',`暫停群組 ${row.chat_id}`,'#D97706'),
     button('撤銷',`撤銷群組授權 ${row.chat_id}`,'#DC2626')
-   ],paused?`⏸ 已暫停（機器人不回應）・${approvedNote(row)}`:approvedNote(row));
+   ],paused?`⏸ 已暫停（回覆連線逾時）・${approvedNote(row)}`:approvedNote(row));
   }),
   {type:'separator',margin:'lg'},
   ...section('等待核准',pending,row=>entry(row,[button('授權',`授權群組 ${row.chat_id}`,'#16A34A'),button('移除',`移除申請 ${row.chat_id}`,'#64748B')],`${day(row.requested_at)} 申請`))
