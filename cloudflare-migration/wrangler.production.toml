@@ -18,6 +18,8 @@ ENABLE_ADMIN = "true"
 DATABASE_BACKEND = "d1"
 ENABLE_EVENT_ORDER_GUARD = "true"
 ENABLE_GROUP_APPROVAL = "true"
+# Private chats with this bot are answered only for this LINE user; everyone else gets the fixed error text.
+PRIVATE_CHAT_ONLY_USER_ID = "U968beed7d5da712989a01ee0e15307f5"
 [[d1_databases]]
 binding = "BOSS_DB"
 database_name = "hit2-boss-d1-production-38984686581"

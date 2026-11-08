@@ -287,3 +287,23 @@ test('worker answers a paused group with the fixed error text and runs nothing',
   await post(g,'隨便聊天','e2');assert.equal(sent.length,1);// not a command: still silent
  }finally{db.close();productionDb.close();}
 });
+
+test('private chats with the production bot are limited to the allowed user',async()=>{
+ const {db,productionDb,env}=setup();try{
+  const {createWorker}=await import('../src/index.js');
+  const owner='U'+'a'.repeat(32),stranger='U'+'b'.repeat(32);
+  const workerEnv={...env,BOSS_DB:env.PRODUCTION_BOSS_DB,LINE_CHANNEL_ACCESS_TOKEN:'t',LINE_CHANNEL_SECRET:'s',STAGING_MODE:'true',ENABLE_STAGING_LINE:'true',STAGING_DATABASE_URL:'x',PRIVATE_CHAT_ONLY_USER_ID:owner};
+  const sent=[];let claims=0;
+  const app=createWorker({eventStoreFactory:()=>({claim:async()=>{claims++;throw new Error('stop');},complete:async()=>{},delivered:async()=>{}}),fetcher:async(url,o)=>{sent.push(JSON.parse(o.body).messages[0].text);return new Response('{}',{status:200});}});
+  const post=async(userId,text,id)=>{
+   const body=JSON.stringify({events:[{type:'message',webhookEventId:id,replyToken:'r'+id,timestamp:Date.now(),source:{type:'user',userId},message:{type:'text',text}}]});
+   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode('s'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+   const sig=btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(body)))));
+   return app.fetch(new Request('https://x/callback',{method:'POST',body,headers:{'x-line-signature':sig}}),workerEnv,{waitUntil(){}});
+  };
+  await post(stranger,'KB','s1');
+  assert.deepEqual(sent,[PAUSED_REPLY_TEXT]);assert.equal(claims,0);
+  await post(owner,'KB','o1');// allowed user proceeds to normal handling (the stub store then aborts)
+  assert.equal(claims,1);assert.equal(sent.length,1);
+ }finally{db.close();productionDb.close();}
+});
