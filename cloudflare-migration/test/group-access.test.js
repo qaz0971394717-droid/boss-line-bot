@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {GROUP_ACCESS_SCHEMA,groupAccessReply,processGroupAccessCommand,rememberGroupName} from '../src/group-access.js';
 import {createSql} from '../src/database.js';
-import {shouldProcessCommand} from '../src/command-filter.js';
+import {shouldProcessCommand,groupPaused,PAUSED_REPLY_TEXT} from '../src/command-filter.js';
 
 function setup(){
  const db=new DatabaseSync(':memory:');
@@ -238,7 +238,7 @@ test('pending requests can be dismissed one by one or all at once without touchi
  }finally{db.close();productionDb.close();}
 });
 
-test('a paused group is silent until resumed; approval is kept and only staging can toggle it',async()=>{
+test('a paused group gets the fixed error text until resumed; approval is kept and only staging can toggle it',async()=>{
  const {db,productionDb,env,sql,managementSql}=setup();try{
   const user='U'+'b'.repeat(32),g='C'+'7'.repeat(32),pending='C'+'8'.repeat(32),ctx={userId:user,sourceType:'user'};
   productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?)").run(g,user);
@@ -255,15 +255,35 @@ test('a paused group is silent until resumed; approval is kept and only staging 
   // Pending groups cannot be paused.
   await processGroupAccessCommand(`暫停群組 ${pending}`,user,env,sql,now,ctx,managementSql);
   assert.equal(productionDb.prepare('SELECT paused FROM group_access WHERE chat_id=?').get(pending).paused,0);
-  // The group the bot serves goes silent; other groups and private chats are unaffected.
-  const bot={...env,DATABASE_BACKEND:'d1',BOSS_DB:env.BOSS_DB,ENABLE_GROUP_APPROVAL:'true'};
-  const prod={...bot,BOSS_DB:env.PRODUCTION_BOSS_DB};
-  assert.equal(await shouldProcessCommand('KB',g,prod,{userId:user,sourceType:'group'}),false);
-  assert.equal(await shouldProcessCommand('K 公墓3',g,prod,{userId:user,sourceType:'group'}),false);
-  assert.equal(await shouldProcessCommand('KB','C'+'9'.repeat(32),prod,{userId:user,sourceType:'group'}),true);
-  assert.equal(await shouldProcessCommand('KB',user,prod,{userId:user,sourceType:'user'}),true);
+  // The production bot answers a paused group with the fixed error text; other groups and private chats are unaffected.
+  const prod={...env,BOSS_DB:env.PRODUCTION_BOSS_DB};
+  const prodSql=createSql(prod);
+  assert.equal(await groupPaused(prodSql,g),true);
+  assert.equal(await groupPaused(prodSql,'C'+'9'.repeat(32)),false);
+  assert.equal(await groupPaused(prodSql,user),false);
+  assert.match(PAUSED_REPLY_TEXT,/資料庫連線逾時/);
   await processGroupAccessCommand(`恢復群組 ${g}`,user,env,sql,now,ctx,managementSql);
   assert.deepEqual({...state()},{status:'approved',paused:0});
-  assert.equal(await shouldProcessCommand('KB',g,prod,{userId:user,sourceType:'group'}),true);
+  assert.equal(await groupPaused(prodSql,g),false);
+ }finally{db.close();productionDb.close();}
+});
+
+test('worker answers a paused group with the fixed error text and runs nothing',async()=>{
+ const {db,productionDb,env}=setup();try{
+  const {createWorker}=await import('../src/index.js');
+  const g='C'+'7'.repeat(32),other='C'+'8'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by,paused) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z','x',1)").run(g);
+  const workerEnv={...env,BOSS_DB:env.PRODUCTION_BOSS_DB,LINE_CHANNEL_ACCESS_TOKEN:'t',LINE_CHANNEL_SECRET:'s',STAGING_MODE:'true',ENABLE_STAGING_LINE:'true',STAGING_DATABASE_URL:'x'};
+  const sent=[];let claims=0;
+  const app=createWorker({eventStoreFactory:()=>({claim:async()=>{claims++;return {state:'new'};},complete:async()=>{},delivered:async()=>{}}),fetcher:async(url,o)=>{sent.push(JSON.parse(o.body).messages[0].text);return new Response('{}',{status:200});}});
+  const post=async(groupId,text,id)=>{
+   const body=JSON.stringify({events:[{type:'message',webhookEventId:id,replyToken:'r'+id,timestamp:Date.now(),source:{type:'group',groupId,userId:'U'+'a'.repeat(32)},message:{type:'text',text}}]});
+   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode('s'),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+   const sig=btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(body)))));
+   return app.fetch(new Request('https://x/callback',{method:'POST',body,headers:{'x-line-signature':sig}}),workerEnv,{waitUntil(){}});
+  };
+  assert.equal((await post(g,'K 公墓3','e1')).status,200);
+  assert.deepEqual(sent,[PAUSED_REPLY_TEXT]);assert.equal(claims,0);
+  await post(g,'隨便聊天','e2');assert.equal(sent.length,1);// not a command: still silent
  }finally{db.close();productionDb.close();}
 });
