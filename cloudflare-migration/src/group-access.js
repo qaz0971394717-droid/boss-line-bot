@@ -9,7 +9,8 @@ export const GROUP_ACCESS_SCHEMA = [
     approved_at TEXT,
     approved_by TEXT,
     group_name TEXT,
-    name_checked_at TEXT
+    name_checked_at TEXT,
+    paused INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE TABLE IF NOT EXISTS group_access_challenges (
     user_id TEXT PRIMARY KEY,
@@ -45,13 +46,14 @@ export async function rememberGroupName(chatId,sourceType,env,sql,fetcher,now=ne
 
 export const isGroupAccessCommand = input => {
   const text=input.trim();
-  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||/^(?:撤銷群組授權|移除申請)\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
+  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||/^(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={},managementSql=null){
   const text=input.trim();
   const dismiss=text.match(/^移除申請\s+(C[a-f0-9]{32})$/i);
-  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||Boolean(dismiss)||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
+  const pause=text.match(/^(暫停群組|恢復群組)\s+(C[a-f0-9]{32})$/i);
+  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||Boolean(dismiss)||Boolean(pause)||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   if(text==='授權群組數'){
@@ -60,15 +62,21 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
     return response(`📊 正式版目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
   }
-  if(text==='群組管理'||text==='移除待核准'||dismiss){
+  if(text==='群組管理'||text==='移除待核准'||dismiss||pause){
     if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 使用群組管理。');
     if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
     // Dropping a pending request only deletes the request row; it never touches approved groups.
     if(dismiss)await managementSql`DELETE FROM group_access WHERE chat_id=${dismiss[1]} AND status='pending'`;
     else if(text==='移除待核准')await managementSql`DELETE FROM group_access WHERE status='pending'`;
+    // Pausing only mutes the group; approval is kept, so it is reversible and needs no password.
+    else if(pause)await managementSql`UPDATE group_access SET paused=${pause[1]==='暫停群組'?1:0} WHERE chat_id=${pause[2]} AND status='approved'`;
     let rows;
-    try{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by,group_name FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
-    catch{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
+    try{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by,group_name,paused FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
+    catch{
+      // Older production schema: columns are added when the production worker is released.
+      try{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by,group_name FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
+      catch{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
+    }
     return createGroupAdminFlex(rows);
   }
   const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);

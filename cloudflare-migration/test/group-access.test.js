@@ -237,3 +237,33 @@ test('pending requests can be dismissed one by one or all at once without touchi
   assert.equal(await shouldProcessCommand(`移除申請 ${p1}`,user,env,{userId:user}),true);
  }finally{db.close();productionDb.close();}
 });
+
+test('a paused group is silent until resumed; approval is kept and only staging can toggle it',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32),g='C'+'7'.repeat(32),pending='C'+'8'.repeat(32),ctx={userId:user,sourceType:'user'};
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at,approved_at,approved_by) VALUES(?,'approved','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z',?)").run(g,user);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,'pending','2026-10-30T00:00:00Z')").run(pending);
+  const state=()=>productionDb.prepare('SELECT status,paused FROM group_access WHERE chat_id=?').get(g);
+  assert.match(JSON.stringify(await processGroupAccessCommand('群組管理',user,env,sql,now,ctx,managementSql)),new RegExp(`暫停群組 ${g}`));
+  // Not from a group, and not on the production bot.
+  assert.match((await processGroupAccessCommand(`暫停群組 ${g}`,g,env,sql,now,{userId:user,sourceType:'group'},managementSql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand(`暫停群組 ${g}`,user,{...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,managementSql),null);
+  assert.equal(state().paused,0);
+  const card=JSON.stringify(await processGroupAccessCommand(`暫停群組 ${g}`,user,env,sql,now,ctx,managementSql));
+  assert.deepEqual({...state()},{status:'approved',paused:1});
+  assert.match(card,/已暫停/);assert.match(card,new RegExp(`恢復群組 ${g}`));
+  // Pending groups cannot be paused.
+  await processGroupAccessCommand(`暫停群組 ${pending}`,user,env,sql,now,ctx,managementSql);
+  assert.equal(productionDb.prepare('SELECT paused FROM group_access WHERE chat_id=?').get(pending).paused,0);
+  // The group the bot serves goes silent; other groups and private chats are unaffected.
+  const bot={...env,DATABASE_BACKEND:'d1',BOSS_DB:env.BOSS_DB,ENABLE_GROUP_APPROVAL:'true'};
+  const prod={...bot,BOSS_DB:env.PRODUCTION_BOSS_DB};
+  assert.equal(await shouldProcessCommand('KB',g,prod,{userId:user,sourceType:'group'}),false);
+  assert.equal(await shouldProcessCommand('K 公墓3',g,prod,{userId:user,sourceType:'group'}),false);
+  assert.equal(await shouldProcessCommand('KB','C'+'9'.repeat(32),prod,{userId:user,sourceType:'group'}),true);
+  assert.equal(await shouldProcessCommand('KB',user,prod,{userId:user,sourceType:'user'}),true);
+  await processGroupAccessCommand(`恢復群組 ${g}`,user,env,sql,now,ctx,managementSql);
+  assert.deepEqual({...state()},{status:'approved',paused:0});
+  assert.equal(await shouldProcessCommand('KB',g,prod,{userId:user,sourceType:'group'}),true);
+ }finally{db.close();productionDb.close();}
+});
