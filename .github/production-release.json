@@ -1,5 +1,5 @@
 {
-  "sha": "a896173432e4cd0799923b573e98bc103ca9d09e",
-  "acceptance": "User approved on 2026-11-08 Asia/Taipei: admin card can pause/resume a group (paused groups are silent on the production bot). Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 115
+  "sha": "b0937deedf994f181e7cc9bb97a98767f55def20",
+  "acceptance": "User approved on 2026-11-08 Asia/Taipei: paused groups answer commands with a fixed database-timeout error text. Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 116
 }
