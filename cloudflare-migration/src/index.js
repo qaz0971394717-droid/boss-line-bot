@@ -10,7 +10,7 @@ import { addKillAuthor } from "./kill-author.js";
 import { groupPaused, PAUSED_REPLY_TEXT } from "./command-filter.js";
 import { fetchWithTimeout } from "./http.js";
 import { createEventStore } from "./events.js";
-import { groupAccessReply, rememberGroupName } from "./group-access.js";
+import { groupAccessReply, rememberGroupName, privateChatAccess } from "./group-access.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 const bytes = (s) => new TextEncoder().encode(s);
@@ -108,8 +108,9 @@ export function createWorker({ commandHandler = handleLineCommand, fetcher = fet
           const context={undoOperationId:event.type==='postback'&&event.postback?.data?.startsWith('undo:')?event.postback.data.slice(5):undefined,userId:event.source?.userId,sourceType:event.source?.type,eventTimestamp:Number.isFinite(event.timestamp)?event.timestamp:Date.now()};
           stage = "command-filter";
           if(commandHandler===handleLineCommand&&!await shouldProcessCommand(command,chatId,env,context))continue;
-          // Paused groups get a fixed error text; nothing is executed or stored.
-          if(commandHandler===handleLineCommand&&env.ENABLE_GROUP_APPROVAL==='true'&&event.source?.type!=='user'&&event.replyToken&&await groupPaused(createSql(env),chatId)){
+          // Paused groups, and private chats from anyone but the allowed user, get a fixed error text; nothing is executed or stored.
+          const privateBlocked=commandHandler===handleLineCommand&&Boolean(env.PRIVATE_CHAT_ONLY_USER_ID)&&event.source?.type==='user'&&event.source.userId!==env.PRIVATE_CHAT_ONLY_USER_ID&&!await privateChatAccess(event.source.userId,env,createSql(env),fetcher,new Date(context.eventTimestamp));
+          if(commandHandler===handleLineCommand&&event.replyToken&&(privateBlocked||(env.ENABLE_GROUP_APPROVAL==='true'&&event.source?.type!=='user'&&await groupPaused(createSql(env),chatId)))){
             const paused=await fetchWithTimeout("https://api.line.me/v2/bot/message/reply",{method:"POST",headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`,"Content-Type":"application/json"},body:JSON.stringify({replyToken:event.replyToken,messages:[{type:"text",text:PAUSED_REPLY_TEXT}]})},fetcher);
             if(!paused.ok)throw new Error(`LINE reply HTTP ${paused.status}`);
             outcomes.push("ok");continue;

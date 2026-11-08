@@ -8,7 +8,7 @@ export async function groupPaused(sql,chatId){
  catch{return false;}
 }
 export async function shouldProcessCommand(text,chatId,env,context){
- if(/^(?:授權群組數|群組管理|移除待核准|(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+C[a-f0-9]{32})$/i.test(text.trim())&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return false;
+ if(/^(?:授權群組數|群組管理|移除待核准|(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32})$/i.test(text.trim())&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return false;
  if(text.trim()===BIRTHDAY_COMMAND)return birthdayEnabled(env,chatId);
  if(knownCommand(text)||(env.ENABLE_OPS_ALERTS==='true'&&text.trim()==='啟用異常通知'))return true;
  const sql=createSql(env);
