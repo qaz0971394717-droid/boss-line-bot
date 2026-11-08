@@ -44,22 +44,42 @@ export async function rememberGroupName(chatId,sourceType,env,sql,fetcher,now=ne
   }catch{}
 }
 
+// Private chats with the production bot: anyone but the owner must be approved in group_access
+// (chat_id = LINE user id). First contact registers a pending request with the display name.
+export async function privateChatAccess(userId,env,sql,fetcher,now=new Date()){
+  try{
+    if(!userId)return false;
+    if(userId===env.PRIVATE_CHAT_ONLY_USER_ID)return true;
+    const rows=await sql`SELECT status FROM group_access WHERE chat_id=${userId}`;
+    if(rows[0]?.status==='approved')return true;
+    if(!rows.length){
+      let name=null;
+      try{
+        const res=await fetcher(`https://api.line.me/v2/bot/profile/${userId}`,{headers:{Authorization:`Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`},signal:AbortSignal.timeout(2000)});
+        if(res.ok)name=String((await res.json())?.displayName||'').slice(0,60)||null;
+      }catch{}
+      await sql`INSERT INTO group_access(chat_id,status,requested_at,group_name,name_checked_at) VALUES(${userId},'pending',${now.toISOString()},${name},${now.toISOString()}) ON CONFLICT(chat_id) DO NOTHING`;
+    }
+    return false;
+  }catch{return false;}
+}
+
 export const isGroupAccessCommand = input => {
   const text=input.trim();
-  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||/^(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+C[a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
+  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||/^(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={},managementSql=null){
   const text=input.trim();
-  const dismiss=text.match(/^移除申請\s+(C[a-f0-9]{32})$/i);
+  const dismiss=text.match(/^移除申請\s+([CU][a-f0-9]{32})$/i);
   const pause=text.match(/^(暫停群組|恢復群組)\s+(C[a-f0-9]{32})$/i);
-  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||Boolean(dismiss)||Boolean(pause)||/^撤銷群組授權\s+C[a-f0-9]{32}$/i.test(text);
+  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||Boolean(dismiss)||Boolean(pause)||/^撤銷群組授權\s+[CU][a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   if(text==='授權群組數'){
     if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 查詢授權群組數。');
     if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
-    const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved'`;
+    const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved' AND chat_id NOT LIKE 'U%'`;
     return response(`📊 正式版目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
   }
   if(text==='群組管理'||text==='移除待核准'||dismiss||pause){
@@ -79,7 +99,7 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     }
     return createGroupAdminFlex(rows);
   }
-  const revoke=text.match(/^撤銷群組授權\s+(C[a-f0-9]{32})$/i);
+  const revoke=text.match(/^撤銷群組授權\s+([CU][a-f0-9]{32})$/i);
   if(revoke){
     if(!privateChat||!context.userId)return response('🔒 請在 HIT2 測試+異常提醒 的 1 對 1 私訊中撤銷群組授權。');
     if(!env.ADMIN_PASSWORD)return response('❌ 管理密碼尚未設定，無法移除授權。');
@@ -113,7 +133,7 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
       : response('ℹ️ 該群組已沒有有效授權。');
    }
   }
-  const approval=text.match(/^授權群組\s+(C[a-f0-9]{32})$/i);
+  const approval=text.match(/^授權群組\s+([CU][a-f0-9]{32})$/i);
   if(approval){
     if(!privateChat)return response('🔒 請私訊 BOSS 機器人進行群組授權。');
     if(!env.ADMIN_PASSWORD)return response('❌ 管理密碼尚未設定，無法授權群組。');

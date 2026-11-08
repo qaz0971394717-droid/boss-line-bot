@@ -303,7 +303,26 @@ test('private chats with the production bot are limited to the allowed user',asy
   };
   await post(stranger,'KB','s1');
   assert.deepEqual(sent,[PAUSED_REPLY_TEXT]);assert.equal(claims,0);
+  assert.equal(productionDb.prepare('SELECT status FROM group_access WHERE chat_id=?').get(stranger).status,'pending');// registered for approval
+  await post(stranger,'KB','s2');assert.equal(sent.length,2);assert.equal(claims,0);// still blocked
   await post(owner,'KB','o1');// allowed user proceeds to normal handling (the stub store then aborts)
-  assert.equal(claims,1);assert.equal(sent.length,1);
+  assert.equal(claims,1);assert.equal(sent.length,2);
+  // The pending person shows on the admin card and can be approved with the usual password flow.
+  const mgmt=createSql({DATABASE_BACKEND:'d1',BOSS_DB:env.PRODUCTION_BOSS_DB}),adminCtx={userId:owner,sourceType:'user'};
+  const card=JSON.stringify(await processGroupAccessCommand('群組管理',owner,env,createSql(env),new Date(),adminCtx,mgmt));
+  assert.match(card,new RegExp(`授權群組 ${stranger}`));assert.match(card,/私訊申請/);
+  await processGroupAccessCommand(`授權群組 ${stranger}`,owner,env,createSql(env),new Date(),adminCtx,mgmt);
+  assert.match((await processGroupAccessCommand('owner-secret',owner,env,createSql(env),new Date(),adminCtx,mgmt)).text,/已授權/);
+  await post(stranger,'KB','s3');assert.equal(claims,2);assert.equal(sent.length,2);// approved person now gets normal handling
+ }finally{db.close();productionDb.close();}
+});
+
+test('approved private users are not counted as groups',async()=>{
+ const {db,productionDb,env,sql,managementSql}=setup();try{
+  const user='U'+'b'.repeat(32);
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run('C'+'1'.repeat(32),'approved',now.toISOString());
+  productionDb.prepare("INSERT INTO group_access(chat_id,status,requested_at) VALUES(?,?,?)").run(user,'approved',now.toISOString());
+  const reply=await processGroupAccessCommand('授權群組數',user,env,sql,now,{sourceType:'user',userId:user},managementSql);
+  assert.match(reply.text,/：1 個群組/);
  }finally{db.close();productionDb.close();}
 });
