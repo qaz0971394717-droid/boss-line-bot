@@ -1,5 +1,5 @@
 {
-  "sha": "b0937deedf994f181e7cc9bb97a98767f55def20",
-  "acceptance": "User approved on 2026-11-08 Asia/Taipei: paused groups answer commands with a fixed database-timeout error text. Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 116
+  "sha": "c2edb51a9a9b64295045e1d6e6cfd929aa6dda0f",
+  "acceptance": "User approved on 2026-11-08 Asia/Taipei: production private chats require approval (non-owner users are registered as pending and shown on the staging admin card). Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 118
 }
