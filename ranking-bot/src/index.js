@@ -111,6 +111,34 @@ async function latestReply(env, now = Date.now()) {
   return day === taipeiDay(now) ? saved.text : `⚠️ 這是 ${day} 的排行，今天的還沒更新。\n\n${saved.text}`;
 }
 
+// Owner-only manual broadcast: "推播 <內容>" stores a draft and shows a preview; "確認推播" sends it
+// to every friend of the bot; "取消推播" drops it. The draft is consumed before sending, so a
+// repeated confirmation can never send twice.
+// The broadcast admin is separate from the owner so enabling it does not switch the bot to owner-only mode.
+const isBroadcastAdmin = (env, userId) =>
+  [env.ADMIN_LINE_USER_ID, env.OWNER_LINE_USER_ID].some((id) => OWNER_PATTERN.test(id || "") && id === userId);
+const BROADCAST_MAX = 4500, DRAFT_TTL_SECONDS = 300;
+async function ownerBroadcast(env, fetcher, userId, text) {
+  if (!env.LATEST) return "❌ 暫存空間未設定，無法推播。";
+  const key = `draft:${userId}`;
+  if (text.startsWith("取消推播")) {
+    await env.LATEST.delete?.(key);
+    return "已取消，沒有推播。";
+  }
+  if (text.startsWith("確認推播")) {
+    const draft = await env.LATEST.get(key, "json");
+    if (!draft?.text || Date.now() - draft.savedAt > DRAFT_TTL_SECONDS * 1000) return "沒有待確認的推播，或已逾時（5 分鐘）。請重新輸入「推播 內容」。";
+    await env.LATEST.delete?.(key);
+    await pushText(env, fetcher, null, draft.text);
+    return "✅ 已推播給所有好友。";
+  }
+  const body = text.replace(/^推播\s*/, "");
+  if (!body) return "用法：推播 要發的內容\n我會先給你預覽，回覆「確認推播」才會發給所有好友。";
+  if (body.length > BROADCAST_MAX) return `❌ 內容太長（${body.length} 字），請縮短到 ${BROADCAST_MAX} 字以內。`;
+  await env.LATEST.put(key, JSON.stringify({ text: body, savedAt: Date.now() }), { expirationTtl: DRAFT_TTL_SECONDS });
+  return `📣 預覽（尚未發送）：\n\n${body}\n\n回覆「確認推播」發給所有好友，或「取消推播」放棄。5 分鐘內有效。`;
+}
+
 const reply = (env, fetcher, replyToken, text) =>
   lineCall(env, fetcher, "/v2/bot/message/reply", { replyToken, messages: [{ type: "text", text }] });
 
@@ -135,6 +163,7 @@ export function createWorker({ fetcher = fetch } = {}) {
           status: "ok",
           schedule: "08:00 Asia/Taipei",
           owner_configured: OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || ""),
+          broadcast_admin_configured: OWNER_PATTERN.test(env.ADMIN_LINE_USER_ID || ""),
           line_configured: Boolean(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN),
         });
       if (request.method === "POST" && path === "/latest") {
@@ -177,7 +206,9 @@ export function createWorker({ fetcher = fetch } = {}) {
           const isOwner = ownerSet && userId === env.OWNER_LINE_USER_ID;
           const allowed = isOwner || !ownerSet; // no owner configured = open to every friend
           try {
-            if (text === "我的ID") {
+            if (isBroadcastAdmin(env, userId) && /^(推播|確認推播|取消推播)(?=\s|$)/.test(text)) {
+              await reply(env, fetcher, event.replyToken, await ownerBroadcast(env, fetcher, userId, text));
+            } else if (text === "我的ID") {
               await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "（目前所有好友都會收到推播）"}`);
             } else if (allowed && /^(排行|今日|今天|top|TOP|現在)$/.test(text)) {
               await reply(env, fetcher, event.replyToken, await latestReply(env));
