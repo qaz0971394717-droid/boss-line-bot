@@ -245,3 +245,51 @@ test("a failed LINE reply is reported so LINE can redeliver", async () => {
   const h = harness({ line: () => 500 }); const worker = createWorker({ fetcher: h.fetcher });
   assert.equal((await callback(worker, baseEnv, [event("排行", OWNER)])).status, 500);
 });
+
+test("owner can broadcast a custom message only after previewing and confirming", async () => {
+  const h = harness();
+  const store = kv();
+  store.delete = async (k) => void store.store.delete(k);
+  const env = { ...baseEnv, LATEST: store };
+  const worker = createWorker({ fetcher: h.fetcher });
+  const replies = () => h.sent.filter((s) => s.url === "/v2/bot/message/reply").map((s) => s.body.messages[0].text);
+  await callback(worker, env, [event("推播 今晚加碼\n第二行")]);
+  assert.equal(h.sent.filter((s) => s.url.includes("broadcast")).length, 0); // preview only
+  assert.match(replies().at(-1), /預覽.*今晚加碼\n第二行.*確認推播/s);
+  await callback(worker, env, [event("確認推播")]);
+  const broadcasts = h.sent.filter((s) => s.url === "/v2/bot/message/broadcast");
+  assert.equal(broadcasts.length, 1);
+  assert.equal(broadcasts[0].body.messages[0].text, "今晚加碼\n第二行");
+  await callback(worker, env, [event("確認推播")]); // second confirmation finds nothing
+  assert.equal(h.sent.filter((s) => s.url === "/v2/bot/message/broadcast").length, 1);
+  assert.match(replies().at(-1), /沒有待確認/);
+  await callback(worker, env, [event("推播 取消我"), event("取消推播")]);
+  await callback(worker, env, [event("確認推播")]);
+  assert.equal(h.sent.filter((s) => s.url === "/v2/bot/message/broadcast").length, 1);
+});
+
+test("nobody but the owner can broadcast, and an open (no-owner) bot never can", async () => {
+  const h = harness();
+  const store = kv();
+  const worker = createWorker({ fetcher: h.fetcher });
+  await callback(worker, { ...baseEnv, LATEST: store }, [event("推播 騙你的", OTHER), event("確認推播", OTHER)]);
+  assert.equal(store.store.size, 0);
+  assert.equal(h.sent.filter((s) => s.url.includes("broadcast")).length, 0);
+  const open = { ...baseEnv, OWNER_LINE_USER_ID: "", LATEST: store };
+  await callback(worker, open, [event("推播 騙你的", OTHER), event("確認推播", OTHER)]);
+  assert.equal(store.store.size, 0);
+  assert.equal(h.sent.filter((s) => s.url.includes("broadcast")).length, 0);
+});
+
+test("broadcast draft expires and over-long messages are refused", async () => {
+  const h = harness();
+  const store = kv();
+  store.delete = async (k) => void store.store.delete(k);
+  const worker = createWorker({ fetcher: h.fetcher });
+  const env = { ...baseEnv, LATEST: store };
+  await callback(worker, env, [event("推播 " + "字".repeat(4501))]);
+  assert.equal(store.store.size, 0);
+  store.store.set(`draft:${OWNER}`, JSON.stringify({ text: "舊的", savedAt: Date.now() - 6 * 60 * 1000 }));
+  await callback(worker, env, [event("確認推播")]);
+  assert.equal(h.sent.filter((s) => s.url.includes("broadcast")).length, 0);
+});
