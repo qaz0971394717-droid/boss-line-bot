@@ -293,3 +293,18 @@ test("broadcast draft expires and over-long messages are refused", async () => {
   await callback(worker, env, [event("確認推播")]);
   assert.equal(h.sent.filter((s) => s.url.includes("broadcast")).length, 0);
 });
+
+test("a separate broadcast admin works in open mode without making the bot owner-only", async () => {
+  const h = harness();
+  const store = kv();
+  store.delete = async (k) => void store.store.delete(k);
+  const worker = createWorker({ fetcher: h.fetcher });
+  const env = { ...baseEnv, OWNER_LINE_USER_ID: "", ADMIN_LINE_USER_ID: OWNER, LATEST: store };
+  await callback(worker, env, [event("推播 大家好", OWNER), event("確認推播", OWNER)]);
+  assert.equal(h.sent.filter((s) => s.url === "/v2/bot/message/broadcast").length, 1);
+  await callback(worker, env, [event("推播 騙你的", OTHER), event("確認推播", OTHER)]);
+  assert.equal(h.sent.filter((s) => s.url === "/v2/bot/message/broadcast").length, 1);
+  // other friends still get normal replies (open mode unchanged)
+  await callback(worker, env, [event("你好", OTHER)]);
+  assert.match(h.sent.at(-1).body.messages[0].text, /每天早上 8 點/);
+});

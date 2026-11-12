@@ -114,6 +114,9 @@ async function latestReply(env, now = Date.now()) {
 // Owner-only manual broadcast: "推播 <內容>" stores a draft and shows a preview; "確認推播" sends it
 // to every friend of the bot; "取消推播" drops it. The draft is consumed before sending, so a
 // repeated confirmation can never send twice.
+// The broadcast admin is separate from the owner so enabling it does not switch the bot to owner-only mode.
+const isBroadcastAdmin = (env, userId) =>
+  [env.ADMIN_LINE_USER_ID, env.OWNER_LINE_USER_ID].some((id) => OWNER_PATTERN.test(id || "") && id === userId);
 const BROADCAST_MAX = 4500, DRAFT_TTL_SECONDS = 300;
 async function ownerBroadcast(env, fetcher, userId, text) {
   if (!env.LATEST) return "❌ 暫存空間未設定，無法推播。";
@@ -160,6 +163,7 @@ export function createWorker({ fetcher = fetch } = {}) {
           status: "ok",
           schedule: "08:00 Asia/Taipei",
           owner_configured: OWNER_PATTERN.test(env.OWNER_LINE_USER_ID || ""),
+          broadcast_admin_configured: OWNER_PATTERN.test(env.ADMIN_LINE_USER_ID || ""),
           line_configured: Boolean(env.LINE_CHANNEL_SECRET && env.LINE_CHANNEL_ACCESS_TOKEN),
         });
       if (request.method === "POST" && path === "/latest") {
@@ -202,7 +206,7 @@ export function createWorker({ fetcher = fetch } = {}) {
           const isOwner = ownerSet && userId === env.OWNER_LINE_USER_ID;
           const allowed = isOwner || !ownerSet; // no owner configured = open to every friend
           try {
-            if (isOwner && /^(推播|確認推播|取消推播)(?=\s|$)/.test(text)) {
+            if (isBroadcastAdmin(env, userId) && /^(推播|確認推播|取消推播)(?=\s|$)/.test(text)) {
               await reply(env, fetcher, event.replyToken, await ownerBroadcast(env, fetcher, userId, text));
             } else if (text === "我的ID") {
               await reply(env, fetcher, event.replyToken, `你的 LINE User ID：\n${userId}\n${isOwner ? "（已設定為接收推播的帳號）" : "（目前所有好友都會收到推播）"}`);
