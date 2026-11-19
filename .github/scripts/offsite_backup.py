@@ -53,7 +53,11 @@ for proj, items in D1.items():
             continue
         con = sqlite3.connect(":memory:")
         try:
-            con.executescript(open(path, encoding="utf-8").read())
+            sql = open(path, encoding="utf-8").read()
+            # D1 dumps reset sqlite_sequence even when no table uses AUTOINCREMENT; plain sqlite has no such table then.
+            if "AUTOINCREMENT" not in sql.upper():
+                sql = re.sub(r"^DELETE FROM sqlite_sequence;\s*$", "", sql, flags=re.M)
+            con.executescript(sql)
         except Exception as e:  # noqa: BLE001
             fail(f"{fname}: cannot be loaded back ({type(e).__name__})")
             continue
