@@ -132,7 +132,15 @@ if not found:
 else:
     for t in PARTS_TABLES:
         wr("r2", "object", "get", f"{R2}/d1/server-parts/{found}/{t}", "--remote", "--file", f"{r2d}/server-parts-{t}")
-    wr("r2", "object", "get", f"{R2}/d1/drive-finder-meta/{found}/kv.json", "--remote", "--file", f"{r2d}/drive-finder-meta-kv.json")
+    # The meta kv.json for the newest day may not exist yet (written later than the parts files), so fall back day by day.
+    kvf = f"{r2d}/drive-finder-meta-kv.json"
+    for back in range(4):
+        kvday = (datetime.date.fromisoformat(found) - datetime.timedelta(days=back)).isoformat()
+        if wr("r2", "object", "get", f"{R2}/d1/drive-finder-meta/{kvday}/kv.json", "--remote", "--file", kvf).returncode == 0 and os.path.getsize(kvf) > 0:
+            print(f"ok drive-finder meta kv.json day {kvday}")
+            break
+    else:
+        fail("drive-finder meta kv.json: not found in the last 4 days")
     open(f"{r2d}/BACKUP_DAY.txt", "w").write(found)
     for t in PARTS_TABLES[1:]:
         try:
