@@ -2,7 +2,7 @@
 
 Never prints secrets. Exit code 1 if anything failed (so the workflow can alert).
 """
-import datetime, json, os, re, shutil, sqlite3, subprocess, sys
+import datetime, json, os, re, shutil, sqlite3, subprocess, sys, time
 
 OUT = "out"
 D1 = {
@@ -47,7 +47,14 @@ for proj, items in D1.items():
     os.makedirs(f"{OUT}/{proj}", exist_ok=True)
     for db, fname in items:
         path = f"{OUT}/{proj}/{fname}"
-        sh(["npx", "wrangler", "d1", "export", db, "--remote", "--output", path])
+        # D1 exports occasionally fail for a moment (API hiccup); retry and keep the reason in the log.
+        for attempt in range(1, 4):
+            r = sh(["npx", "wrangler", "d1", "export", db, "--remote", "--output", path])
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                break
+            print(f"export {fname} attempt {attempt} failed: " + re.sub(r"\[[0-9;]*m", "", (r.stderr or r.stdout or "")).replace(chr(10), " ")[:300])
+            if attempt < 3:
+                time.sleep(20 * attempt)
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             fail(f"{fname}: export failed")
             continue
