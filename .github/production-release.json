@@ -1,5 +1,5 @@
 {
-  "sha": "c2edb51a9a9b64295045e1d6e6cfd929aa6dda0f",
-  "acceptance": "User approved on 2026-11-08 Asia/Taipei: production private chats require approval (non-owner users are registered as pending and shown on the staging admin card). Preserve existing Discord reminders and disabled LINE respawn pushes.",
-  "tests": 118
+  "sha": "69bc7faefe53d10f64da4dea99b4bdd1c453b840",
+  "acceptance": "User approved on 2026-11-24 Asia/Taipei: daily KB table push to approved groups (cron every 30 min, configurable time and on/off switch from the staging admin card). Preserve existing Discord reminders and disabled LINE respawn pushes.",
+  "tests": 123
 }
