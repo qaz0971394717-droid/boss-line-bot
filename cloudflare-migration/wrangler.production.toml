@@ -20,10 +20,10 @@ ENABLE_EVENT_ORDER_GUARD = "true"
 ENABLE_GROUP_APPROVAL = "true"
 # Private chats with this bot are answered only for this LINE user; everyone else gets the fixed error text.
 PRIVATE_CHAT_ONLY_USER_ID = "U968beed7d5da712989a01ee0e15307f5"
-# Daily KB table push to approved groups at 18:00 Asia/Taipei (10:00 UTC).
+# Daily KB table push to approved groups. The cron checks every 30 minutes; the send time (default 18:00 Asia/Taipei) is set from the staging admin card.
 ENABLE_DAILY_KB_PUSH = "true"
 [triggers]
-crons = ["0 10 * * *"]
+crons = ["0,30 * * * *"]
 
 [[d1_databases]]
 binding = "BOSS_DB"

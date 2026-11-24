@@ -5,6 +5,7 @@ import {runDailyKbPush} from '../src/daily-kb-push.js';
 import {GROUP_ACCESS_SCHEMA} from '../src/group-access.js';
 import production from '../src/production.js';
 
+const SLOT=new Date('2026-11-24T10:00:00Z'); // 18:00 Asia/Taipei
 const G1='C'+'1'.repeat(32),G2='C'+'2'.repeat(32),G3='C'+'3'.repeat(32),G4='C'+'4'.repeat(32),G5='C'+'5'.repeat(32);
 function setup(){
  const db=new DatabaseSync(':memory:');
@@ -39,12 +40,12 @@ test('does nothing unless enabled and configured; failures are counted',async()=
  const {db,grp,boss,env}=setup();try{
   grp(G5,'approved');boss(G5);
   const r=recorder();
-  assert.deepEqual(await runDailyKbPush({...env,ENABLE_DAILY_KB_PUSH:'false'},r.fetcher),{skipped:'disabled'});
-  assert.deepEqual(await runDailyKbPush({...env,PRODUCTION_MODE:'false'},r.fetcher),{skipped:'disabled'});
-  assert.deepEqual(await runDailyKbPush({...env,LINE_CHANNEL_ACCESS_TOKEN:''},r.fetcher),{skipped:'not-configured'});
+  assert.deepEqual(await runDailyKbPush({...env,ENABLE_DAILY_KB_PUSH:'false'},r.fetcher,SLOT),{skipped:'disabled'});
+  assert.deepEqual(await runDailyKbPush({...env,PRODUCTION_MODE:'false'},r.fetcher,SLOT),{skipped:'disabled'});
+  assert.deepEqual(await runDailyKbPush({...env,LINE_CHANNEL_ACCESS_TOKEN:''},r.fetcher,SLOT),{skipped:'not-configured'});
   assert.equal(r.calls.length,0);
-  assert.equal((await runDailyKbPush(env,recorder(500).fetcher)).failed,1);
-  assert.equal((await runDailyKbPush(env,async()=>{throw new Error('down');})).failed,1);
+  assert.equal((await runDailyKbPush(env,recorder(500).fetcher,new Date('2026-11-25T10:00:00Z'))).failed,1);
+  assert.equal((await runDailyKbPush(env,async()=>{throw new Error('down');},new Date('2026-11-26T10:00:00Z'))).failed,1);
  }finally{db.close();}
 });
 
@@ -71,11 +72,38 @@ test('the card switch turns the daily push off and on again',async()=>{
   assert.match(JSON.stringify(await run('群組管理')),/目前：開啟/);
   assert.match(JSON.stringify(await run('關閉每日推播')),/目前：關閉.*開啟每日推播/);
   const r=recorder();
-  assert.deepEqual(await runDailyKbPush(env,r.fetcher),{skipped:'switched-off'});assert.equal(r.calls.length,0);
+  assert.deepEqual(await runDailyKbPush(env,r.fetcher,SLOT),{skipped:'switched-off'});assert.equal(r.calls.length,0);
   assert.match(JSON.stringify(await run('開啟每日推播')),/目前：開啟.*關閉每日推播/);
-  assert.equal((await runDailyKbPush(env,r.fetcher)).sent,1);
+  assert.equal((await runDailyKbPush(env,r.fetcher,SLOT)).sent,1);
   // not from a group, and not on the production bot
   assert.match((await processGroupAccessCommand('關閉每日推播',G5,admin,sql,now,{userId:user,sourceType:'group'},sql)).text,/私訊/);
   assert.equal(await processGroupAccessCommand('關閉每日推播',user,{...admin,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,sql),null);
+ }finally{db.close();}
+});
+
+test('sends only in the configured half-hour slot, once per day',async()=>{
+ const {processGroupAccessCommand}=await import('../src/group-access.js');
+ const {createSql}=await import('../src/database.js');
+ const {db,grp,boss,env}=setup();try{
+  grp(G5,'approved');boss(G5);
+  const user='U'+'b'.repeat(32),ctx={userId:user,sourceType:'user'},now=new Date('2026-11-24T10:00:00Z');
+  const admin={...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'true',ADMIN_PASSWORD:'x'};
+  const sql=createSql(env);
+  const run=text=>processGroupAccessCommand(text,user,admin,sql,now,ctx,sql);
+  const r=recorder();
+  const at=iso=>runDailyKbPush(env,r.fetcher,new Date(iso));
+  // default 18:00 Taipei = 10:00Z; other slots stay quiet
+  assert.deepEqual(await at('2026-11-24T09:30:00Z'),{skipped:'not-this-time'});
+  assert.equal((await at('2026-11-24T10:00:00Z')).sent,1);
+  assert.deepEqual(await at('2026-11-24T10:00:00Z'),{skipped:'already-sent-today'}); // never twice in a day
+  assert.equal((await at('2026-11-25T10:00:00Z')).sent,1);                           // next day sends again
+  // change the time from the card
+  assert.match(JSON.stringify(await run('推播時間 20:30')),/每天 20:30/);
+  assert.deepEqual(await at('2026-11-26T10:00:00Z'),{skipped:'not-this-time'});
+  assert.equal((await at('2026-11-26T12:30:00Z')).sent,1);                           // 20:30 Taipei
+  assert.match(JSON.stringify(await run('推播時間 8:00')),/每天 08:00/);
+  for(const bad of ['推播時間 18:15','推播時間 25:00','推播時間 晚上六點'])assert.match((await run(bad)).text,/時間格式錯誤/);
+  assert.match((await processGroupAccessCommand('推播時間 20:00',G5,admin,sql,now,{userId:user,sourceType:'group'},sql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('推播時間 20:00',user,{...admin,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,sql),null);
  }finally{db.close();}
 });

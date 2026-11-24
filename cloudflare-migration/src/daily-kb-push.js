@@ -13,6 +13,20 @@ export async function runDailyKbPush(env, fetcher = fetch, now = new Date()) {
     const setting = await sql`SELECT value FROM bot_settings WHERE key='daily_kb_push'`;
     if (setting[0]?.value === "off") return { skipped: "switched-off" };
   } catch {}
+  // Runs every 30 minutes; only the slot matching the configured Taipei time (default 18:00) sends, once per day.
+  const taipei = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now).map((p) => [p.type, p.value]));
+  const today = `${taipei.year}-${taipei.month}-${taipei.day}`, slot = `${taipei.hour}:${taipei.minute}`;
+  let wanted = "18:00", lastSent = null;
+  try {
+    const rows = await sql`SELECT key,value FROM bot_settings WHERE key IN ('daily_kb_push_time','daily_kb_push_last')`;
+    wanted = rows.find((r) => r.key === "daily_kb_push_time")?.value || wanted;
+    lastSent = rows.find((r) => r.key === "daily_kb_push_last")?.value;
+  } catch {}
+  if (slot !== wanted) return { skipped: "not-this-time" };
+  if (lastSent === today) return { skipped: "already-sent-today" };
+  try {
+    await sql`INSERT INTO bot_settings(key,value) VALUES('daily_kb_push_last',${today}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
+  } catch {}
   let groups;
   try {
     groups = await sql`SELECT chat_id FROM group_access WHERE status='approved' AND COALESCE(paused,0)=0 AND chat_id LIKE 'C%'`;

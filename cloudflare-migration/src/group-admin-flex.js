@@ -15,12 +15,12 @@ const section=(title,rows,build)=>[text(`${title}（${rows.length}）`,{weight:'
  ...(rows.length?rows.slice(0,MAX_ROWS).map(build):[text('目前沒有',{size:'xs',color:'#94A3B8',margin:'sm'})]),
  ...(rows.length>MAX_ROWS?[text(`還有 ${rows.length-MAX_ROWS} 個未顯示，請改用「撤銷群組授權 群組ID」`,{size:'xs',color:'#B45309',margin:'sm'})]:[])];
 
-export function createGroupAdminFlex(rows,{dailyPush=true}={}){
+export function createGroupAdminFlex(rows,{dailyPush=true,dailyTime='18:00'}={}){
  const approved=rows.filter(r=>r.status==='approved');
  const pending=rows.filter(r=>r.status==='pending');
  const approvedNote=row=>row.approved_by==='grandfathered'?'舊群組（原本就在使用）':`${day(row.approved_at)} 授權`;
  const body=[
-  {type:'box',layout:'horizontal',alignItems:'center',margin:'md',spacing:'sm',contents:[{type:'box',layout:'vertical',flex:1,contents:[text('每日 18:00 王表推播',{weight:'bold',color:'#0F172A'}),text(dailyPush?'🟢 目前：開啟':'⚪ 目前：關閉',{size:'xs',color:'#64748B'})]},{type:'box',layout:'vertical',flex:0,contents:[dailyPush?button('關閉','關閉每日推播','#64748B'):button('開啟','開啟每日推播','#16A34A')]}]},
+  {type:'box',layout:'horizontal',alignItems:'center',margin:'md',spacing:'sm',contents:[{type:'box',layout:'vertical',flex:1,contents:[text('每日王表推播',{weight:'bold',color:'#0F172A'}),text((dailyPush?`🟢 目前：開啟（每天 ${dailyTime}）`:`⚪ 目前：關閉（原定每天 ${dailyTime}）`)+'\n改時間請輸入「推播時間 20:30」',{size:'xs',color:'#64748B'})]},{type:'box',layout:'vertical',flex:0,contents:[dailyPush?button('關閉','關閉每日推播','#64748B'):button('開啟','開啟每日推播','#16A34A')]}]},
   {type:'separator',margin:'lg'},
   ...section('已授權群組',approved,row=>{
    const paused=Number(row.paused)===1;
