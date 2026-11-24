@@ -58,3 +58,24 @@ test('the production worker exposes the scheduled handler and fails loudly on pu
   finally{globalThis.fetch=original;}
  }finally{db.close();}
 });
+
+test('the card switch turns the daily push off and on again',async()=>{
+ const {processGroupAccessCommand}=await import('../src/group-access.js');
+ const {createSql}=await import('../src/database.js');
+ const {db,grp,boss,env}=setup();try{
+  grp(G5,'approved');boss(G5);
+  const user='U'+'b'.repeat(32),ctx={userId:user,sourceType:'user'},now=new Date('2026-11-24T10:00:00Z');
+  const admin={...env,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'true',ADMIN_PASSWORD:'x'};
+  const sql=createSql(env);
+  const run=text=>processGroupAccessCommand(text,user,admin,sql,now,ctx,sql);
+  assert.match(JSON.stringify(await run('群組管理')),/目前：開啟/);
+  assert.match(JSON.stringify(await run('關閉每日推播')),/目前：關閉.*開啟每日推播/);
+  const r=recorder();
+  assert.deepEqual(await runDailyKbPush(env,r.fetcher),{skipped:'switched-off'});assert.equal(r.calls.length,0);
+  assert.match(JSON.stringify(await run('開啟每日推播')),/目前：開啟.*關閉每日推播/);
+  assert.equal((await runDailyKbPush(env,r.fetcher)).sent,1);
+  // not from a group, and not on the production bot
+  assert.match((await processGroupAccessCommand('關閉每日推播',G5,admin,sql,now,{userId:user,sourceType:'group'},sql)).text,/私訊/);
+  assert.equal(await processGroupAccessCommand('關閉每日推播',user,{...admin,ENABLE_STAGING_GROUP_ACCESS_ADMIN:'false'},sql,now,ctx,sql),null);
+ }finally{db.close();}
+});

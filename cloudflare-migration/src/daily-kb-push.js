@@ -8,6 +8,11 @@ export async function runDailyKbPush(env, fetcher = fetch, now = new Date()) {
   if (env.PRODUCTION_MODE !== "true" || env.ENABLE_DAILY_KB_PUSH !== "true") return { skipped: "disabled" };
   if (env.DATABASE_BACKEND !== "d1" || !env.BOSS_DB?.prepare || !env.LINE_CHANNEL_ACCESS_TOKEN) return { skipped: "not-configured" };
   const sql = createSql(env);
+  // The admin card can switch the push off; a missing table or row means on.
+  try {
+    const setting = await sql`SELECT value FROM bot_settings WHERE key='daily_kb_push'`;
+    if (setting[0]?.value === "off") return { skipped: "switched-off" };
+  } catch {}
   let groups;
   try {
     groups = await sql`SELECT chat_id FROM group_access WHERE status='approved' AND COALESCE(paused,0)=0 AND chat_id LIKE 'C%'`;

@@ -1,6 +1,6 @@
 import {BIRTHDAY_COMMAND,birthdayEnabled} from './birthday.js';
 import {createSql} from './database.js';
-export const knownCommand=text=>/^(?:申請使用|授權群組數|群組管理|移除待核准|同步提醒|HELP|復原|指令文字|進階指令文字|管理指令文字|指令|進階指令|管理指令|群組ID|GROUPID|測試|TEST|RESTART|清除KB|王列表|BOSS列表|KB|王|BOSS|HALF(?:\s+(?:ON|OFF))?)$/i.test(text.trim())||/^(?:授權群組|撤銷群組授權|移除申請|暫停群組|恢復群組|確認覆蓋|取消覆蓋|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王)\s+/i.test(text.trim());
+export const knownCommand=text=>/^(?:申請使用|授權群組數|群組管理|移除待核准|開啟每日推播|關閉每日推播|同步提醒|HELP|復原|指令文字|進階指令文字|管理指令文字|指令|進階指令|管理指令|群組ID|GROUPID|測試|TEST|RESTART|清除KB|王列表|BOSS列表|KB|王|BOSS|HALF(?:\s+(?:ON|OFF))?)$/i.test(text.trim())||/^(?:授權群組|撤銷群組授權|移除申請|暫停群組|恢復群組|確認覆蓋|取消覆蓋|K|KBKILL|取消|修改出生|新增王|批次新增王|修改王|刪除王)\s+/i.test(text.trim());
 // Shown for every command in a paused group; made to look like an outage on purpose.
 export const PAUSED_REPLY_TEXT='❌ 資料庫連線逾時（D1_ERROR: Network connection lost）請稍後再試。';
 export async function groupPaused(sql,chatId){
@@ -8,7 +8,7 @@ export async function groupPaused(sql,chatId){
  catch{return false;}
 }
 export async function shouldProcessCommand(text,chatId,env,context){
- if(/^(?:授權群組數|群組管理|移除待核准|(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32})$/i.test(text.trim())&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return false;
+ if(/^(?:授權群組數|群組管理|移除待核准|開啟每日推播|關閉每日推播|(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32})$/i.test(text.trim())&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return false;
  if(text.trim()===BIRTHDAY_COMMAND)return birthdayEnabled(env,chatId);
  if(knownCommand(text)||(env.ENABLE_OPS_ALERTS==='true'&&text.trim()==='啟用異常通知'))return true;
  const sql=createSql(env);
