@@ -1,10 +1,16 @@
 import { migrationGate } from './migration.js';
 import { createWorker } from './index.js';
+import { runDailyKbPush } from './daily-kb-push.js';
 
 // Reuse the verified command engine through an explicit configuration adapter.
 // Never fall back to staging credentials or expose Discord/reminder routes.
 export function createProductionWorker({ worker = createWorker(), migrationHandler = migrationGate } = {}) {
   return {
+    async scheduled(event, env) {
+      const result = await runDailyKbPush(env, fetch, new Date(event.scheduledTime || Date.now()));
+      console.log('Daily KB push:', JSON.stringify(result));
+      if (result.failed) throw new Error(`Daily KB push failed for ${result.failed} group(s)`);
+    },
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
       const discordReady=env.PRODUCTION_MODE==='true'&&env.ENABLE_DISCORD_KB==='true'&&env.DATABASE_BACKEND==='d1'&&Boolean(env.BOSS_DB?.prepare)&&/^[a-f0-9]{64}$/i.test(env.DISCORD_PUBLIC_KEY||'')&&/^C[a-f0-9]{32}$/i.test(env.DISCORD_KB_LINE_CHAT_ID||'');

@@ -23,6 +23,10 @@ export const GROUP_ACCESS_SCHEMA = [
     action TEXT NOT NULL CHECK(action IN ('revoke')),
     expires_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`,
   'CREATE INDEX IF NOT EXISTS group_access_status ON group_access(status,requested_at)'
 ];
 
@@ -66,14 +70,17 @@ export async function privateChatAccess(userId,env,sql,fetcher,now=new Date()){
 
 export const isGroupAccessCommand = input => {
   const text=input.trim();
-  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||/^(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
+  return text==='申請使用'||text==='授權群組數'||text==='群組管理'||text==='移除待核准'||text==='開啟每日推播'||text==='關閉每日推播'||/^推播時間\s+\S+$/.test(text)||/^(?:撤銷群組授權|移除申請|暫停群組|恢復群組)\s+[CU][a-f0-9]{32}$/i.test(text)||/^授權群組\s+\S+$/.test(text);
 };
 
 export async function processGroupAccessCommand(input,chatId,env,sql,now=new Date(),context={},managementSql=null){
   const text=input.trim();
   const dismiss=text.match(/^移除申請\s+([CU][a-f0-9]{32})$/i);
   const pause=text.match(/^(暫停群組|恢復群組)\s+(C[a-f0-9]{32})$/i);
-  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||Boolean(dismiss)||Boolean(pause)||/^撤銷群組授權\s+[CU][a-f0-9]{32}$/i.test(text);
+  const dailyToggle=text==='開啟每日推播'||text==='關閉每日推播';
+  const timeCommand=text.match(/^推播時間\s+(\S+)$/);
+  const timeValue=timeCommand?.[1].match(/^([01]?\d|2[0-3])[:：]([03]0)$/);
+  const stagingOnlyCommand=text==='授權群組數'||text==='群組管理'||text==='移除待核准'||dailyToggle||Boolean(dismiss)||Boolean(pause)||Boolean(timeCommand)||/^撤銷群組授權\s+[CU][a-f0-9]{32}$/i.test(text);
   if(stagingOnlyCommand&&env.ENABLE_STAGING_GROUP_ACCESS_ADMIN!=='true')return null;
   const privateChat=context.sourceType==='user'&&context.userId&&chatId===context.userId;
   if(text==='授權群組數'){
@@ -82,12 +89,15 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
     const rows=await managementSql`SELECT count(*) AS count FROM group_access WHERE status='approved' AND chat_id NOT LIKE 'U%'`;
     return response(`📊 正式版目前已授權：${Number(rows[0]?.count||0)} 個群組。`);
   }
-  if(text==='群組管理'||text==='移除待核准'||dismiss||pause){
+  if(text==='群組管理'||text==='移除待核准'||dismiss||pause||dailyToggle||timeCommand){
     if(!privateChat)return response('🔒 請私訊 HIT2 測試+異常提醒 使用群組管理。');
     if(!managementSql)return response('❌ 正式授權資料庫尚未連線，無法查詢。');
+    if(timeCommand&&!timeValue)return response('❌ 時間格式錯誤。請輸入「推播時間 18:30」，只能設整點或半點（例如 08:00、18:30）。');
     // Dropping a pending request only deletes the request row; it never touches approved groups.
     if(dismiss)await managementSql`DELETE FROM group_access WHERE chat_id=${dismiss[1]} AND status='pending'`;
     else if(text==='移除待核准')await managementSql`DELETE FROM group_access WHERE status='pending'`;
+    else if(dailyToggle)await managementSql`INSERT INTO bot_settings(key,value) VALUES('daily_kb_push',${text==='開啟每日推播'?'on':'off'}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
+    else if(timeValue)await managementSql`INSERT INTO bot_settings(key,value) VALUES('daily_kb_push_time',${timeValue[1].padStart(2,'0')+':'+timeValue[2]}) ON CONFLICT(key) DO UPDATE SET value=excluded.value`;
     // Pausing only mutes the group; approval is kept, so it is reversible and needs no password.
     else if(pause)await managementSql`UPDATE group_access SET paused=${pause[1]==='暫停群組'?1:0} WHERE chat_id=${pause[2]} AND status='approved'`;
     let rows;
@@ -97,7 +107,13 @@ export async function processGroupAccessCommand(input,chatId,env,sql,now=new Dat
       try{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by,group_name FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
       catch{rows=await managementSql`SELECT chat_id,status,requested_at,approved_at,approved_by FROM group_access WHERE status IN ('approved','pending') ORDER BY status,COALESCE(approved_at,requested_at) DESC`;}
     }
-    return createGroupAdminFlex(rows);
+    let dailyPush=true,dailyTime='18:00';
+    try{
+      const settings=await managementSql`SELECT key,value FROM bot_settings WHERE key IN ('daily_kb_push','daily_kb_push_time')`;
+      dailyPush=settings.find(s=>s.key==='daily_kb_push')?.value!=='off';
+      dailyTime=settings.find(s=>s.key==='daily_kb_push_time')?.value||dailyTime;
+    }catch{}
+    return createGroupAdminFlex(rows,{dailyPush,dailyTime});
   }
   const revoke=text.match(/^撤銷群組授權\s+([CU][a-f0-9]{32})$/i);
   if(revoke){
